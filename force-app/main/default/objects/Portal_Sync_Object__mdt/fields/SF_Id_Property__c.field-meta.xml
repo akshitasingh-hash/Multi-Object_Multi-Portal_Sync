@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>SF_Id_Property__c</fullName>
+    <description>HubSpot unique property that holds the Salesforce record id, used as the idProperty for batch upsert/read (e.g. contact_id_sf, account_id_sf). Must be configured UNIQUE in HubSpot.</description>
+    <externalId>false</externalId>
+    <fieldManageability>SubscriberControlled</fieldManageability>
+    <label>SF Id Property</label>
+    <length>255</length>
+    <required>true</required>
+    <type>Text</type>
+    <unique>false</unique>
+</CustomField>
