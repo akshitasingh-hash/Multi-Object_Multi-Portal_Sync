@@ -450,4 +450,164 @@ private class PortalSyncTest {
         Account after = [SELECT HS_Sync_Status__c FROM Account WHERE Id = :a.Id];
         System.assertEquals(PortalSyncConfig.STATUS_PENDING, after.HS_Sync_Status__c);
     }
+
+    // ---- Opportunity: the generic engine driving a third object -------------
+    // Same outbox/router/handler code syncing Opportunity via its
+    // Portal_Sync_Object__mdt config (HubSpot deals, deal_id_sf). Opportunity is
+    // a standard object requiring Name/StageName/CloseDate on insert.
+
+    private static Opportunity makePendingOpp(String portal, Boolean portalChanged) {
+        Opportunity o = new Opportunity(
+            Name = 'Deal ' + Math.round(Math.random()*100000),
+            StageName = 'Prospecting', CloseDate = Date.today().addDays(30),
+            Portal__c = portal
+        );
+        insert o;
+        // Pin the exact status + portalChanged flag this test needs (the trigger
+        // stamps Pending on insert with portalChanged=false).
+        o.HS_Sync_Status__c = PortalSyncConfig.STATUS_PENDING;
+        o.HS_Portal_Changed__c = portalChanged;
+        update o;
+        return o;
+    }
+
+    @isTest
+    static void opportunityOutboxSyncsPending() {
+        Test.setMock(HttpCalloutMock.class, new HubSpotCalloutMock());
+        Opportunity o = makePendingOpp('TriBU', false);
+        Test.startTest();
+        Database.executeBatch(new OpportunityOutboxBatch(), PortalSyncConfig.BATCH_SCOPE);
+        Test.stopTest();
+        Opportunity after = [SELECT HS_Sync_Status__c FROM Opportunity WHERE Id = :o.Id];
+        System.assertEquals(PortalSyncConfig.STATUS_SYNCED, after.HS_Sync_Status__c);
+        System.assertEquals(0, [SELECT COUNT() FROM PortalSyncDeadLetter__c]);
+    }
+
+    @isTest
+    static void opportunityPortalMoveArchivesOthers() {
+        Test.setMock(HttpCalloutMock.class, new HubSpotCalloutMock());
+        Opportunity o = makePendingOpp('TriBU', true); // portal changed -> archive others
+        Test.startTest();
+        Database.executeBatch(new OpportunityOutboxBatch(), PortalSyncConfig.BATCH_SCOPE);
+        Test.stopTest();
+        Opportunity after = [SELECT HS_Sync_Status__c, HS_Portal_Changed__c FROM Opportunity WHERE Id = :o.Id];
+        System.assertEquals(PortalSyncConfig.STATUS_SYNCED, after.HS_Sync_Status__c);
+        System.assertEquals(false, after.HS_Portal_Changed__c, 'flag cleared after sync');
+    }
+
+    @isTest
+    static void opportunityArchivesInNoPortal() {
+        HubSpotCalloutMock mock = new HubSpotCalloutMock();
+        mock.returnExisting = true; // force batch/read to resolve a deal id to archive
+        Test.setMock(HttpCalloutMock.class, mock);
+        Opportunity o = makePendingOpp('', false); // blank Portal__c -> selectedPortals empty
+        Test.startTest();
+        Database.executeBatch(new OpportunityOutboxBatch(), PortalSyncConfig.BATCH_SCOPE);
+        Test.stopTest();
+        Opportunity after = [SELECT HS_Sync_Status__c FROM Opportunity WHERE Id = :o.Id];
+        System.assertEquals(PortalSyncConfig.STATUS_SYNCED, after.HS_Sync_Status__c);
+        System.assertEquals(0, [SELECT COUNT() FROM PortalSyncDeadLetter__c]);
+    }
+
+    @isTest
+    static void opportunityFailedUpsertDeadLetters() {
+        HubSpotCalloutMock mock = new HubSpotCalloutMock();
+        mock.failBatch = true;
+        Test.setMock(HttpCalloutMock.class, mock);
+        Opportunity o = makePendingOpp('TriBU', false);
+        Test.startTest();
+        Database.executeBatch(new OpportunityOutboxBatch(), PortalSyncConfig.BATCH_SCOPE);
+        Test.stopTest();
+        Opportunity after = [SELECT HS_Sync_Status__c, HS_Retry_Count__c FROM Opportunity WHERE Id = :o.Id];
+        System.assertEquals(PortalSyncConfig.STATUS_FAILED, after.HS_Sync_Status__c);
+        System.assertEquals(1, after.HS_Retry_Count__c, 'retry incremented on failure');
+        List<PortalSyncDeadLetter__c> dead = [SELECT SObject_Name__c FROM PortalSyncDeadLetter__c];
+        System.assertEquals(1, dead.size(), 'a failed Opportunity upsert should buffer a dead-letter row');
+        System.assertEquals('Opportunity', dead[0].SObject_Name__c, 'dead letter should be tagged with the object');
+    }
+
+    @isTest
+    static void opportunityTombstoneArchivesAndDrains() {
+        // Stamp a Pending Opportunity tombstone directly (as the after-delete
+        // trigger would), then prove the shared TombstoneOutboxBatch archives it
+        // under the Opportunity config and drains it.
+        HubSpotCalloutMock mock = new HubSpotCalloutMock();
+        mock.returnExisting = true;
+        Test.setMock(HttpCalloutMock.class, mock);
+        Opportunity o = new Opportunity(
+            Name = 'Tomb', StageName = 'Prospecting', CloseDate = Date.today().addDays(30),
+            Portal__c = 'TriBU'
+        );
+        insert o;
+        insert new HS_Sync_Tombstone__c(
+            SObject_Name__c = 'Opportunity', Record_Id__c = o.Id,
+            Status__c = PortalSyncConfig.STATUS_PENDING, Retry_Count__c = 0
+        );
+        Test.startTest();
+        Database.executeBatch(new TombstoneOutboxBatch(), PortalSyncConfig.BATCH_SCOPE);
+        Test.stopTest();
+        System.assertEquals(0, [SELECT COUNT() FROM HS_Sync_Tombstone__c],
+            'archived Opportunity tombstone should be deleted');
+    }
+
+    @isTest
+    static void opportunityTriggerStampsPendingOnInsert() {
+        Opportunity o = new Opportunity(
+            Name = 'New Deal', StageName = 'Prospecting', CloseDate = Date.today().addDays(30),
+            Portal__c = 'TriBU'
+        );
+        insert o;
+        Opportunity after = [SELECT HS_Sync_Status__c, HS_Portal_Changed__c, HS_Retry_Count__c
+                             FROM Opportunity WHERE Id = :o.Id];
+        System.assertEquals(PortalSyncConfig.STATUS_PENDING, after.HS_Sync_Status__c,
+            'every new Opportunity should be stamped Pending by the before-insert trigger');
+        System.assertEquals(false, after.HS_Portal_Changed__c, 'no portal move on create');
+        System.assertEquals(0, after.HS_Retry_Count__c);
+    }
+
+    @isTest
+    static void opportunityReconciliationRuns() {
+        Test.setMock(HttpCalloutMock.class, new HubSpotCalloutMock());
+        insert new Opportunity(
+            Name = 'Rec Deal', StageName = 'Prospecting', CloseDate = Date.today().addDays(30),
+            Portal__c = 'TriBU'
+        );
+        Test.startTest();
+        Database.executeBatch(new PortalSyncReconciliationBatch('Opportunity', 30), PortalSyncConfig.BATCH_SCOPE);
+        Test.stopTest();
+        System.assertEquals(0, [SELECT COUNT() FROM PortalSyncDeadLetter__c]);
+    }
+
+    @isTest
+    static void opportunityDeleteWritesAndDrainsTombstone() {
+        Test.setMock(HttpCalloutMock.class, new HubSpotCalloutMock());
+        Opportunity o = new Opportunity(
+            Name = 'Del Deal', StageName = 'Prospecting', CloseDate = Date.today().addDays(30),
+            Portal__c = 'Spain'
+        );
+        insert o;
+        delete o; // after-delete trigger writes a tombstone tagged Opportunity
+        System.assertEquals(1, [SELECT COUNT() FROM HS_Sync_Tombstone__c WHERE SObject_Name__c = 'Opportunity']);
+        Test.startTest();
+        Database.executeBatch(new TombstoneOutboxBatch(), PortalSyncConfig.BATCH_SCOPE);
+        Test.stopTest();
+        System.assertEquals(0, [SELECT COUNT() FROM HS_Sync_Tombstone__c],
+            'tombstone removed after successful archive');
+    }
+
+    @isTest
+    static void opportunityUndeleteRestamps() {
+        Test.setMock(HttpCalloutMock.class, new HubSpotCalloutMock());
+        Opportunity o = new Opportunity(
+            Name = 'Undel Deal', StageName = 'Prospecting', CloseDate = Date.today().addDays(30),
+            Portal__c = 'Spain'
+        );
+        insert o;
+        delete o;
+        Test.startTest();
+        undelete o;
+        Test.stopTest();
+        Opportunity after = [SELECT HS_Sync_Status__c FROM Opportunity WHERE Id = :o.Id];
+        System.assertEquals(PortalSyncConfig.STATUS_PENDING, after.HS_Sync_Status__c);
+    }
 }
