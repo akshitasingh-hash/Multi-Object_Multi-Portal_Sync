@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Portal_Sync_Object__c</fullName>
+    <fieldManageability>DeveloperControlled</fieldManageability>
+    <label>Portal Sync Object</label>
+    <referenceTo>Portal_Sync_Object__mdt</referenceTo>
+    <relationshipLabel>HubSpot Field Mappings</relationshipLabel>
+    <relationshipName>HubSpot_Field_Mappings</relationshipName>
+    <required>false</required>
+    <type>MetadataRelationship</type>
+    <unique>false</unique>
+</CustomField>
