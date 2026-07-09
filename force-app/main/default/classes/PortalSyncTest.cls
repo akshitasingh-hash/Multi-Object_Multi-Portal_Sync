@@ -610,4 +610,158 @@ private class PortalSyncTest {
         Opportunity after = [SELECT HS_Sync_Status__c FROM Opportunity WHERE Id = :o.Id];
         System.assertEquals(PortalSyncConfig.STATUS_PENDING, after.HS_Sync_Status__c);
     }
+
+    // ---- Asset: the generic engine driving a fourth object ------------------
+    // Same outbox/router/handler code syncing Asset via its Portal_Sync_Object__mdt
+    // config (HubSpot assets, asset_id_sf). Asset is a standard object requiring
+    // Name plus a parent Account/Contact on insert.
+
+    private static Id parentAcctId;
+    private static Id parentAccountId() {
+        if (parentAcctId == null) {
+            Account a = new Account(Name = 'Asset Parent');
+            insert a;
+            parentAcctId = a.Id;
+        }
+        return parentAcctId;
+    }
+
+    private static Asset makePendingAsset(String portal, Boolean portalChanged) {
+        Asset asset = new Asset(
+            Name = 'Widget ' + Math.round(Math.random()*100000),
+            AccountId = parentAccountId(), Portal__c = portal
+        );
+        insert asset;
+        // Pin the exact status + portalChanged flag this test needs (the trigger
+        // stamps Pending on insert with portalChanged=false).
+        asset.HS_Sync_Status__c = PortalSyncConfig.STATUS_PENDING;
+        asset.HS_Portal_Changed__c = portalChanged;
+        update asset;
+        return asset;
+    }
+
+    @isTest
+    static void assetOutboxSyncsPending() {
+        Test.setMock(HttpCalloutMock.class, new HubSpotCalloutMock());
+        Asset asset = makePendingAsset('TriBU', false);
+        Test.startTest();
+        Database.executeBatch(new AssetOutboxBatch(), PortalSyncConfig.BATCH_SCOPE);
+        Test.stopTest();
+        Asset after = [SELECT HS_Sync_Status__c FROM Asset WHERE Id = :asset.Id];
+        System.assertEquals(PortalSyncConfig.STATUS_SYNCED, after.HS_Sync_Status__c);
+        System.assertEquals(0, [SELECT COUNT() FROM PortalSyncDeadLetter__c]);
+    }
+
+    @isTest
+    static void assetPortalMoveArchivesOthers() {
+        Test.setMock(HttpCalloutMock.class, new HubSpotCalloutMock());
+        Asset asset = makePendingAsset('TriBU', true); // portal changed -> archive others
+        Test.startTest();
+        Database.executeBatch(new AssetOutboxBatch(), PortalSyncConfig.BATCH_SCOPE);
+        Test.stopTest();
+        Asset after = [SELECT HS_Sync_Status__c, HS_Portal_Changed__c FROM Asset WHERE Id = :asset.Id];
+        System.assertEquals(PortalSyncConfig.STATUS_SYNCED, after.HS_Sync_Status__c);
+        System.assertEquals(false, after.HS_Portal_Changed__c, 'flag cleared after sync');
+    }
+
+    @isTest
+    static void assetArchivesInNoPortal() {
+        HubSpotCalloutMock mock = new HubSpotCalloutMock();
+        mock.returnExisting = true; // force batch/read to resolve an asset id to archive
+        Test.setMock(HttpCalloutMock.class, mock);
+        Asset asset = makePendingAsset('', false); // blank Portal__c -> selectedPortals empty
+        Test.startTest();
+        Database.executeBatch(new AssetOutboxBatch(), PortalSyncConfig.BATCH_SCOPE);
+        Test.stopTest();
+        Asset after = [SELECT HS_Sync_Status__c FROM Asset WHERE Id = :asset.Id];
+        System.assertEquals(PortalSyncConfig.STATUS_SYNCED, after.HS_Sync_Status__c);
+        System.assertEquals(0, [SELECT COUNT() FROM PortalSyncDeadLetter__c]);
+    }
+
+    @isTest
+    static void assetFailedUpsertDeadLetters() {
+        HubSpotCalloutMock mock = new HubSpotCalloutMock();
+        mock.failBatch = true;
+        Test.setMock(HttpCalloutMock.class, mock);
+        Asset asset = makePendingAsset('TriBU', false);
+        Test.startTest();
+        Database.executeBatch(new AssetOutboxBatch(), PortalSyncConfig.BATCH_SCOPE);
+        Test.stopTest();
+        Asset after = [SELECT HS_Sync_Status__c, HS_Retry_Count__c FROM Asset WHERE Id = :asset.Id];
+        System.assertEquals(PortalSyncConfig.STATUS_FAILED, after.HS_Sync_Status__c);
+        System.assertEquals(1, after.HS_Retry_Count__c, 'retry incremented on failure');
+        List<PortalSyncDeadLetter__c> dead = [SELECT SObject_Name__c FROM PortalSyncDeadLetter__c];
+        System.assertEquals(1, dead.size(), 'a failed Asset upsert should buffer a dead-letter row');
+        System.assertEquals('Asset', dead[0].SObject_Name__c, 'dead letter should be tagged with the object');
+    }
+
+    @isTest
+    static void assetTombstoneArchivesAndDrains() {
+        // Stamp a Pending Asset tombstone directly (as the after-delete trigger
+        // would), then prove the shared TombstoneOutboxBatch archives it under the
+        // Asset config and drains it.
+        HubSpotCalloutMock mock = new HubSpotCalloutMock();
+        mock.returnExisting = true;
+        Test.setMock(HttpCalloutMock.class, mock);
+        Asset asset = new Asset(Name = 'Tomb', AccountId = parentAccountId(), Portal__c = 'TriBU');
+        insert asset;
+        insert new HS_Sync_Tombstone__c(
+            SObject_Name__c = 'Asset', Record_Id__c = asset.Id,
+            Status__c = PortalSyncConfig.STATUS_PENDING, Retry_Count__c = 0
+        );
+        Test.startTest();
+        Database.executeBatch(new TombstoneOutboxBatch(), PortalSyncConfig.BATCH_SCOPE);
+        Test.stopTest();
+        System.assertEquals(0, [SELECT COUNT() FROM HS_Sync_Tombstone__c],
+            'archived Asset tombstone should be deleted');
+    }
+
+    @isTest
+    static void assetTriggerStampsPendingOnInsert() {
+        Asset asset = new Asset(Name = 'New Widget', AccountId = parentAccountId(), Portal__c = 'TriBU');
+        insert asset;
+        Asset after = [SELECT HS_Sync_Status__c, HS_Portal_Changed__c, HS_Retry_Count__c
+                       FROM Asset WHERE Id = :asset.Id];
+        System.assertEquals(PortalSyncConfig.STATUS_PENDING, after.HS_Sync_Status__c,
+            'every new Asset should be stamped Pending by the before-insert trigger');
+        System.assertEquals(false, after.HS_Portal_Changed__c, 'no portal move on create');
+        System.assertEquals(0, after.HS_Retry_Count__c);
+    }
+
+    @isTest
+    static void assetReconciliationRuns() {
+        Test.setMock(HttpCalloutMock.class, new HubSpotCalloutMock());
+        insert new Asset(Name = 'Rec Widget', AccountId = parentAccountId(), Portal__c = 'TriBU');
+        Test.startTest();
+        Database.executeBatch(new PortalSyncReconciliationBatch('Asset', 30), PortalSyncConfig.BATCH_SCOPE);
+        Test.stopTest();
+        System.assertEquals(0, [SELECT COUNT() FROM PortalSyncDeadLetter__c]);
+    }
+
+    @isTest
+    static void assetDeleteWritesAndDrainsTombstone() {
+        Test.setMock(HttpCalloutMock.class, new HubSpotCalloutMock());
+        Asset asset = new Asset(Name = 'Del Widget', AccountId = parentAccountId(), Portal__c = 'Spain');
+        insert asset;
+        delete asset; // after-delete trigger writes a tombstone tagged Asset
+        System.assertEquals(1, [SELECT COUNT() FROM HS_Sync_Tombstone__c WHERE SObject_Name__c = 'Asset']);
+        Test.startTest();
+        Database.executeBatch(new TombstoneOutboxBatch(), PortalSyncConfig.BATCH_SCOPE);
+        Test.stopTest();
+        System.assertEquals(0, [SELECT COUNT() FROM HS_Sync_Tombstone__c],
+            'tombstone removed after successful archive');
+    }
+
+    @isTest
+    static void assetUndeleteRestamps() {
+        Test.setMock(HttpCalloutMock.class, new HubSpotCalloutMock());
+        Asset asset = new Asset(Name = 'Undel Widget', AccountId = parentAccountId(), Portal__c = 'Spain');
+        insert asset;
+        delete asset;
+        Test.startTest();
+        undelete asset;
+        Test.stopTest();
+        Asset after = [SELECT HS_Sync_Status__c FROM Asset WHERE Id = :asset.Id];
+        System.assertEquals(PortalSyncConfig.STATUS_PENDING, after.HS_Sync_Status__c);
+    }
 }
