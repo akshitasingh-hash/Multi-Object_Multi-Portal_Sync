@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>From_Object__c</fullName>
+    <description>The Portal_Sync_Object__mdt record that OWNS the association (the &quot;from&quot; side of the HubSpot v4 association endpoint). This object&apos;s outbox drives the association pass.</description>
+    <fieldManageability>DeveloperControlled</fieldManageability>
+    <label>From Object</label>
+    <referenceTo>Portal_Sync_Object__mdt</referenceTo>
+    <relationshipLabel>Portal Sync Associations (From)</relationshipLabel>
+    <relationshipName>Portal_Sync_Associations_From</relationshipName>
+    <required>false</required>
+    <type>MetadataRelationship</type>
+    <unique>false</unique>
+</CustomField>

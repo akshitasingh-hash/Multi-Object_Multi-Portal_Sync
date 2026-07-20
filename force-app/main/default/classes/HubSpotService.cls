@@ -135,8 +135,9 @@ public with sharing class HubSpotService {
 
     /** Resolve sfId -> HubSpot object id for a chunk. Ids the read callout fails
      *  on are added to `failed` with detail; ids simply not found are omitted
-     *  (absent = archive no-op). */
-    private static Map<String, String> resolveHubSpotIds(PortalSyncConfig.ObjectConfig cfg, String portalValue, List<String> sfIds, Map<String, String> failed) {
+     *  (absent = the record is not in this portal yet). Public so the association
+     *  router can resolve both ends of a link to their HubSpot ids per portal. */
+    public static Map<String, String> resolveHubSpotIds(PortalSyncConfig.ObjectConfig cfg, String portalValue, List<String> sfIds, Map<String, String> failed) {
         Map<String, String> hsIdBySfId = new Map<String, String>();
         String idProperty = cfg.sfIdProperty;
         List<Object> inputs = new List<Object>();
@@ -168,6 +169,168 @@ public with sharing class HubSpotService {
             if (hsId != null && sfId != null) hsIdBySfId.put(sfId, hsId);
         }
         return hsIdBySfId;
+    }
+
+    // ---- Associations (CRM v4) ---------------------------------------------
+    // Associations LINK two records by their HubSpot object ids (not by sf-id),
+    // so both ends must already exist in the portal -- the caller resolves each
+    // side with resolveHubSpotIds first. All three endpoints are per portal and
+    // chunk at 100 like the object batch calls.
+
+    /** One directional link, in HubSpot-id space. */
+    public class AssocInput {
+        public String fromId;
+        public String toId;
+        public AssocInput(String fromId, String toId) { this.fromId = fromId; this.toId = toId; }
+        public String key() { return fromId + '>' + toId; }
+    }
+
+    private static String assocPath(String fromPath, String toPath, String op) {
+        return '/crm/v4/associations/' + fromPath + '/' + toPath + '/batch/' + op;
+    }
+
+    /**
+     * Read existing associations for a set of from-record HubSpot ids, returning
+     * fromHsId -> set of toHsId, filtered to the given (category, typeId) so the
+     * diff only manages associations of the type this row owns. A null typeId
+     * matches any type. from-ids whose read callout fails are recorded in `failed`
+     * (keyed by fromHsId) so the caller can suppress removals for them.
+     */
+    public static Map<String, Set<String>> batchReadAssociations(
+            String fromPath, String toPath, String portalValue,
+            List<String> fromHsIds, String category, Integer typeId, Map<String, String> failed) {
+        Map<String, Set<String>> existing = new Map<String, Set<String>>();
+        for (Integer i = 0; i < fromHsIds.size(); i += BATCH_LIMIT) {
+            Integer stop = Math.min(i + BATCH_LIMIT, fromHsIds.size());
+            List<Object> inputs = new List<Object>();
+            List<String> chunkIds = new List<String>();
+            for (Integer j = i; j < stop; j++) {
+                chunkIds.add(fromHsIds[j]);
+                inputs.add(new Map<String, Object>{ 'id' => fromHsIds[j] });
+            }
+            String body = JSON.serialize(new Map<String, Object>{ 'inputs' => inputs });
+            HttpResponse res;
+            try {
+                res = send(portalValue, 'POST', assocPath(fromPath, toPath, 'read'), body);
+            } catch (Exception e) {
+                for (String id : chunkIds) failed.put(id, 'ASSOC READ callout error: ' + e.getMessage());
+                continue;
+            }
+            if (!isOk(res)) {
+                String detail = 'ASSOC READ ' + errorDetail(res);
+                for (String id : chunkIds) failed.put(id, detail);
+                continue;
+            }
+            for (Object o : resultsOf(res.getBody())) {
+                Map<String, Object> r = (Map<String, Object>) o;
+                Map<String, Object> fromNode = (Map<String, Object>) r.get('from');
+                String fromId = (fromNode != null) ? String.valueOf(fromNode.get('id')) : null;
+                if (fromId == null) continue;
+                if (!existing.containsKey(fromId)) existing.put(fromId, new Set<String>());
+                List<Object> tos = (List<Object>) r.get('to');
+                if (tos == null) continue;
+                for (Object t : tos) {
+                    Map<String, Object> toNode = (Map<String, Object>) t;
+                    Object toIdObj = (toNode.get('toObjectId') != null) ? toNode.get('toObjectId') : toNode.get('id');
+                    if (toIdObj == null) continue;
+                    if (typeId == null || matchesType(toNode, category, typeId)) {
+                        existing.get(fromId).add(String.valueOf(toIdObj));
+                    }
+                }
+            }
+        }
+        return existing;
+    }
+
+    private static Boolean matchesType(Map<String, Object> toEntry, String category, Integer typeId) {
+        List<Object> types = (List<Object>) toEntry.get('associationTypes');
+        if (types == null) return false;
+        for (Object o : types) {
+            Map<String, Object> t = (Map<String, Object>) o;
+            Object tid = t.get('typeId');
+            // JSON numbers deserialize as Integer/Long/Decimal -- compare as text.
+            Boolean idOk = (tid != null) && (String.valueOf(tid) == String.valueOf(typeId));
+            Object cat = t.get('category');
+            Boolean catOk = (category == null) || (cat == null)
+                || category.equalsIgnoreCase(String.valueOf(cat));
+            if (idOk && catOk) return true;
+        }
+        return false;
+    }
+
+    /** Bulk create associations of one (category, typeId). Returns 'fromHs>toHs'
+     *  -> failure detail for links that did NOT create (empty => all created). */
+    public static Map<String, String> batchCreateAssociations(
+            String fromPath, String toPath, String portalValue,
+            String category, Integer typeId, List<AssocInput> links) {
+        Map<String, String> failed = new Map<String, String>();
+        for (Integer i = 0; i < links.size(); i += BATCH_LIMIT) {
+            Integer stop = Math.min(i + BATCH_LIMIT, links.size());
+            List<Object> inputs = new List<Object>();
+            List<AssocInput> chunk = new List<AssocInput>();
+            for (Integer j = i; j < stop; j++) {
+                AssocInput link = links[j];
+                chunk.add(link);
+                inputs.add(new Map<String, Object>{
+                    'from'  => new Map<String, Object>{ 'id' => link.fromId },
+                    'to'    => new Map<String, Object>{ 'id' => link.toId },
+                    'types' => new List<Object>{
+                        new Map<String, Object>{
+                            'associationCategory' => category,
+                            'associationTypeId'   => typeId
+                        }
+                    }
+                });
+            }
+            String body = JSON.serialize(new Map<String, Object>{ 'inputs' => inputs });
+            HttpResponse res;
+            try {
+                res = send(portalValue, 'POST', assocPath(fromPath, toPath, 'create'), body);
+            } catch (Exception e) {
+                for (AssocInput link : chunk) failed.put(link.key(), 'Callout error: ' + e.getMessage());
+                continue;
+            }
+            if (!isOk(res)) {
+                String detail = errorDetail(res);
+                for (AssocInput link : chunk) failed.put(link.key(), detail);
+            }
+        }
+        return failed;
+    }
+
+    /** Bulk archive associations between the given pairs. Note: HubSpot's v4
+     *  batch archive removes ALL association types between a from/to pair, so this
+     *  is used only for pairs Salesforce no longer relates at all. Returns
+     *  'fromHs>toHs' -> failure detail (empty => all archived). */
+    public static Map<String, String> batchArchiveAssociations(
+            String fromPath, String toPath, String portalValue, List<AssocInput> links) {
+        Map<String, String> failed = new Map<String, String>();
+        for (Integer i = 0; i < links.size(); i += BATCH_LIMIT) {
+            Integer stop = Math.min(i + BATCH_LIMIT, links.size());
+            List<Object> inputs = new List<Object>();
+            List<AssocInput> chunk = new List<AssocInput>();
+            for (Integer j = i; j < stop; j++) {
+                AssocInput link = links[j];
+                chunk.add(link);
+                inputs.add(new Map<String, Object>{
+                    'from' => new Map<String, Object>{ 'id' => link.fromId },
+                    'to'   => new Map<String, Object>{ 'id' => link.toId }
+                });
+            }
+            String body = JSON.serialize(new Map<String, Object>{ 'inputs' => inputs });
+            HttpResponse res;
+            try {
+                res = send(portalValue, 'POST', assocPath(fromPath, toPath, 'archive'), body);
+            } catch (Exception e) {
+                for (AssocInput link : chunk) failed.put(link.key(), 'Callout error: ' + e.getMessage());
+                continue;
+            }
+            if (res.getStatusCode() != 204 && !isOk(res)) {
+                String detail = errorDetail(res);
+                for (AssocInput link : chunk) failed.put(link.key(), detail);
+            }
+        }
+        return failed;
     }
 
     /** sf-ids present in a batch response's results[].properties, read under the

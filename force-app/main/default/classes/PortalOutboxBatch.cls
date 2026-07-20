@@ -39,6 +39,9 @@ public virtual with sharing class PortalOutboxBatch
             'Id', cfg.portalField, cfg.portalChangedField, cfg.retryCountField
         };
         fields.addAll(PortalSyncConfig.mappedSfFields(cfg.sObjectName));
+        // Lookup-source association FKs (e.g. AccountId) so the association pass
+        // can read the related record id without a second query.
+        fields.addAll(PortalSyncConfig.associationSourceFields(cfg.sObjectName));
 
         String soql =
             'SELECT ' + String.join(new List<String>(fields), ', ') +
@@ -60,6 +63,15 @@ public virtual with sharing class PortalOutboxBatch
         Map<Id, Boolean> success = new Map<Id, Boolean>();
         success.putAll(PortalRouter.syncRecords(cfg, plain, false));
         success.putAll(PortalRouter.syncRecords(cfg, moved, true));
+
+        // 1b) Associations for records that synced OK -- still callout phase, so
+        // it runs before any DML. Failures dead-letter but don't fail the record
+        // (the field sync succeeded; a bad link self-heals on the next pass).
+        List<SObject> synced = new List<SObject>();
+        for (SObject record : scope) {
+            if (success.get(record.Id) == true) synced.add(record);
+        }
+        PortalAssociationRouter.syncAssociations(cfg, synced);
 
         // 2) DML only, after every callout is done.
         Schema.SObjectType sot = Schema.getGlobalDescribe().get(cfg.sObjectName);

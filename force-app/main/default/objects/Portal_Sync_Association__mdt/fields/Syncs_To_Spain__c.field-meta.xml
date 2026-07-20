@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Syncs_To_Spain__c</fullName>
+    <defaultValue>false</defaultValue>
+    <description>When checked, this association is asserted in the Spain portal (only where both records also sync to Spain).</description>
+    <fieldManageability>SubscriberControlled</fieldManageability>
+    <label>Syncs To Spain</label>
+    <type>Checkbox</type>
+</CustomField>

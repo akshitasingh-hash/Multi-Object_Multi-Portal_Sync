@@ -175,6 +175,108 @@ public with sharing class PortalSyncConfig {
         return new List<String>(PORTAL_TO_NAMED_CREDENTIAL.keySet());
     }
 
+    // ---- Associations (Portal_Sync_Association__mdt) -------------------------
+    // HubSpot associations LINK two already-synced records (by their HubSpot ids),
+    // rather than sync field values. Each row names a From object, a To object,
+    // how the related record's SF id is found (a Lookup field or a Junction
+    // object), the HubSpot association type to assert, and the portals it applies
+    // to. Driven by the From object's outbox + reconciliation passes.
+
+    /** Resolved configuration for one association type. Carries both objects'
+     *  HubSpot path + sf-id property so the router can resolve either side. */
+    public class AssociationConfig {
+        public String fromObject;
+        public String toObject;
+        public String fromHubSpotPath;
+        public String toHubSpotPath;
+        public String fromSfIdProperty;
+        public String toSfIdProperty;
+        public String sourceType;          // 'Lookup' | 'Junction'
+        public String relationshipField;   // Lookup: FK field on the From record
+        public String junctionObject;      // Junction: linking SObject API name
+        public String junctionFromField;   // Junction: FK -> From record id
+        public String junctionToField;     // Junction: FK -> To record id
+        public String associationCategory; // HUBSPOT_DEFINED | USER_DEFINED
+        public Integer associationTypeId;  // HubSpot association type id
+        public Map<String, Boolean> portalOptIn = new Map<String, Boolean>();
+        public Boolean active;
+
+        public Boolean isJunction() { return 'Junction'.equalsIgnoreCase(sourceType); }
+        public Boolean syncsTo(String portal) { return portalOptIn.get(portal) == true; }
+    }
+
+    // Loaded lazily and cached for the transaction. from-object name -> its rows.
+    private static Map<String, List<AssociationConfig>> associationsByFrom;
+
+    private static Map<String, List<AssociationConfig>> associationConfigs() {
+        if (associationsByFrom == null) {
+            associationsByFrom = new Map<String, List<AssociationConfig>>();
+            for (Portal_Sync_Association__mdt a : [
+                    SELECT Source_Type__c, Relationship_Field__c, Junction_Object__c,
+                           Junction_From_Field__c, Junction_To_Field__c,
+                           Association_Category__c, Association_Type_Id__c, Active__c,
+                           Syncs_To_TriBU__c, Syncs_To_CARL__c, Syncs_To_Spain__c,
+                           From_Object__r.SObject_API_Name__c, From_Object__r.HubSpot_Object_Path__c,
+                           From_Object__r.SF_Id_Property__c, From_Object__r.Active__c,
+                           To_Object__r.SObject_API_Name__c, To_Object__r.HubSpot_Object_Path__c,
+                           To_Object__r.SF_Id_Property__c, To_Object__r.Active__c
+                    FROM Portal_Sync_Association__mdt
+                    WHERE Active__c = true
+                      AND From_Object__r.Active__c = true
+                      AND To_Object__r.Active__c = true]) {
+                if (String.isBlank(a.From_Object__r.SObject_API_Name__c)
+                        || String.isBlank(a.To_Object__r.SObject_API_Name__c)) {
+                    continue;
+                }
+                AssociationConfig cfg = new AssociationConfig();
+                cfg.fromObject         = a.From_Object__r.SObject_API_Name__c;
+                cfg.toObject           = a.To_Object__r.SObject_API_Name__c;
+                cfg.fromHubSpotPath    = a.From_Object__r.HubSpot_Object_Path__c;
+                cfg.toHubSpotPath      = a.To_Object__r.HubSpot_Object_Path__c;
+                cfg.fromSfIdProperty   = a.From_Object__r.SF_Id_Property__c;
+                cfg.toSfIdProperty     = a.To_Object__r.SF_Id_Property__c;
+                cfg.sourceType         = a.Source_Type__c;
+                cfg.relationshipField  = a.Relationship_Field__c;
+                cfg.junctionObject     = a.Junction_Object__c;
+                cfg.junctionFromField  = a.Junction_From_Field__c;
+                cfg.junctionToField    = a.Junction_To_Field__c;
+                cfg.associationCategory = String.isBlank(a.Association_Category__c)
+                    ? 'HUBSPOT_DEFINED' : a.Association_Category__c;
+                cfg.associationTypeId  = (a.Association_Type_Id__c == null)
+                    ? null : a.Association_Type_Id__c.intValue();
+                cfg.active             = (a.Active__c == true);
+                for (String portal : PORTAL_TO_SYNC_FIELD.keySet()) {
+                    Object opt = a.get(PORTAL_TO_SYNC_FIELD.get(portal));
+                    cfg.portalOptIn.put(portal, opt != null && (Boolean) opt);
+                }
+                if (!associationsByFrom.containsKey(cfg.fromObject)) {
+                    associationsByFrom.put(cfg.fromObject, new List<AssociationConfig>());
+                }
+                associationsByFrom.get(cfg.fromObject).add(cfg);
+            }
+        }
+        return associationsByFrom;
+    }
+
+    /** Active associations owned by (driven from) one object. Empty when none. */
+    public static List<AssociationConfig> associationsFrom(String sObjectName) {
+        List<AssociationConfig> rows = associationConfigs().get(sObjectName);
+        return (rows != null) ? rows : new List<AssociationConfig>();
+    }
+
+    /** Lookup-source FK fields the From object's outbox/reconciliation SOQL must
+     *  select so the router can read the related record id (Junction sources need
+     *  no extra field -- they are resolved by a separate query). */
+    public static Set<String> associationSourceFields(String sObjectName) {
+        Set<String> fields = new Set<String>();
+        for (AssociationConfig a : associationsFrom(sObjectName)) {
+            if (!a.isJunction() && String.isNotBlank(a.relationshipField)) {
+                fields.add(a.relationshipField);
+            }
+        }
+        return fields;
+    }
+
     /**
      * The portal field is a MULTISELECT picklist, so its value arrives as a
      * semicolon-delimited string (e.g. "TriBU;CARL"). Split it and keep only the

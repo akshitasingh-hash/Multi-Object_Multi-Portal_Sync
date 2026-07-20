@@ -30,6 +30,7 @@ public with sharing class PortalSyncReconciliationBatch
     public Database.QueryLocator start(Database.BatchableContext bc) {
         Set<String> fields = new Set<String>{ 'Id', cfg.portalField };
         fields.addAll(PortalSyncConfig.mappedSfFields(cfg.sObjectName));
+        fields.addAll(PortalSyncConfig.associationSourceFields(cfg.sObjectName));
         return Database.getQueryLocator(
             'SELECT ' + String.join(new List<String>(fields), ', ') +
             ' FROM ' + cfg.sObjectName + ' WHERE LastModifiedDate = LAST_N_DAYS:' + this.lookbackDays
@@ -38,6 +39,15 @@ public with sharing class PortalSyncReconciliationBatch
 
     public void execute(Database.BatchableContext bc, List<SObject> scope) {
         Map<Id, Boolean> success = PortalRouter.syncRecords(cfg, scope, true); // full sweep, bulk
+
+        // Reassert associations (full create + archive diff) for records that
+        // synced OK -- callout phase, before the DML below.
+        List<SObject> synced = new List<SObject>();
+        for (SObject record : scope) {
+            if (success.get(record.Id) == true) synced.add(record);
+        }
+        PortalAssociationRouter.syncAssociations(cfg, synced);
+
         Schema.SObjectType sot = Schema.getGlobalDescribe().get(cfg.sObjectName);
         List<SObject> updates = new List<SObject>();
         for (SObject record : scope) {

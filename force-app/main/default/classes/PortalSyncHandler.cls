@@ -57,6 +57,27 @@ public with sharing class PortalSyncHandler {
         if (!tombstones.isEmpty()) insert tombstones;
     }
 
+    /**
+     * Re-stamp existing records Pending by id, without a portal move. Used when
+     * something OTHER than the record's own fields changed its HubSpot state --
+     * e.g. an association junction row (OpportunityContactRole) was added or
+     * removed, so the related Contact must re-run its association pass. Touches
+     * only the status + retry fields (not the portal-changed flag), so the outbox
+     * upserts without a needless archive sweep.
+     */
+    public static void stampByIds(PortalSyncConfig.ObjectConfig cfg, Set<Id> ids) {
+        if (ids == null || ids.isEmpty()) return;
+        Schema.SObjectType sot = Schema.getGlobalDescribe().get(cfg.sObjectName);
+        List<SObject> updates = new List<SObject>();
+        for (Id recId : ids) {
+            SObject u = sot.newSObject(recId);
+            u.put(cfg.statusField, PortalSyncConfig.STATUS_PENDING);
+            u.put(cfg.retryCountField, 0);
+            updates.add(u);
+        }
+        update updates;
+    }
+
     public static void stampForResync(PortalSyncConfig.ObjectConfig cfg, List<SObject> restored) {
         Schema.SObjectType sot = Schema.getGlobalDescribe().get(cfg.sObjectName);
         List<SObject> updates = new List<SObject>();

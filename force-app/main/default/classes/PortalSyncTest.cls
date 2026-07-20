@@ -764,4 +764,158 @@ private class PortalSyncTest {
         Asset after = [SELECT HS_Sync_Status__c FROM Asset WHERE Id = :asset.Id];
         System.assertEquals(PortalSyncConfig.STATUS_PENDING, after.HS_Sync_Status__c);
     }
+
+    // ---- Associations: Contact->Account (Lookup) & Contact->Deal (Junction) --
+    // The Contact outbox reasserts HubSpot associations after the field upserts.
+    // returnExisting makes the object batch/read resolve both ends to HubSpot ids;
+    // the association endpoints are handled separately by the mock.
+
+    private static Account makeAccountFor(String portal) {
+        Account a = new Account(Name = 'Assoc Co ' + Math.round(Math.random()*100000), Portal__c = portal);
+        insert a;
+        return a;
+    }
+
+    private static Contact makePendingContactWithAccount(String portal, Id accountId) {
+        Contact c = new Contact(LastName = 'Assoc', Portal__c = portal, AccountId = accountId);
+        insert c;
+        c.HS_Sync_Status__c = PortalSyncConfig.STATUS_PENDING;
+        c.HS_Portal_Changed__c = false;
+        update c;
+        return c;
+    }
+
+    @isTest
+    static void associationCreatesContactToAccount() {
+        // Contact with an AccountId, both resolvable in HubSpot, no existing link
+        // -> the outbox creates the Contact->Account association. No dead letters,
+        // and the field sync still lands the Contact Synced.
+        HubSpotCalloutMock mock = new HubSpotCalloutMock();
+        mock.returnExisting = true; // resolve both ends to HubSpot ids
+        Test.setMock(HttpCalloutMock.class, mock);
+        Account a = makeAccountFor('TriBU');
+        Contact c = makePendingContactWithAccount('TriBU', a.Id);
+        Test.startTest();
+        Database.executeBatch(new ContactOutboxBatch(), PortalSyncConfig.BATCH_SCOPE);
+        Test.stopTest();
+        Contact after = [SELECT HS_Sync_Status__c FROM Contact WHERE Id = :c.Id];
+        System.assertEquals(PortalSyncConfig.STATUS_SYNCED, after.HS_Sync_Status__c);
+        System.assertEquals(0, [SELECT COUNT() FROM PortalSyncDeadLetter__c],
+            'a clean association create should not dead-letter');
+    }
+
+    @isTest
+    static void associationCreatesContactToDealViaJunction() {
+        // OpportunityContactRole is the Contact->Deal junction. A role links the
+        // contact to the deal; the outbox resolves both and creates the association.
+        HubSpotCalloutMock mock = new HubSpotCalloutMock();
+        mock.returnExisting = true;
+        Test.setMock(HttpCalloutMock.class, mock);
+        Opportunity o = new Opportunity(
+            Name = 'Assoc Deal', StageName = 'Prospecting', CloseDate = Date.today().addDays(30),
+            Portal__c = 'TriBU');
+        insert o;
+        Contact c = new Contact(LastName = 'DealAssoc', Portal__c = 'TriBU');
+        insert c; // stamped Pending by trigger
+        insert new OpportunityContactRole(OpportunityId = o.Id, ContactId = c.Id);
+        Test.startTest();
+        Database.executeBatch(new ContactOutboxBatch(), PortalSyncConfig.BATCH_SCOPE);
+        Test.stopTest();
+        Contact after = [SELECT HS_Sync_Status__c FROM Contact WHERE Id = :c.Id];
+        System.assertEquals(PortalSyncConfig.STATUS_SYNCED, after.HS_Sync_Status__c);
+        System.assertEquals(0, [SELECT COUNT() FROM PortalSyncDeadLetter__c]);
+    }
+
+    @isTest
+    static void associationArchivesStaleLink() {
+        // Contact relates to no other record, but HubSpot reports an existing link
+        // -> the diff archives it. returnExistingAssociations drives the stale link.
+        HubSpotCalloutMock mock = new HubSpotCalloutMock();
+        mock.returnExisting = true;
+        mock.returnExistingAssociations = true;
+        Test.setMock(HttpCalloutMock.class, mock);
+        Contact c = makePending('TriBU', false); // no AccountId, no OCR
+        Test.startTest();
+        Database.executeBatch(new ContactOutboxBatch(), PortalSyncConfig.BATCH_SCOPE);
+        Test.stopTest();
+        Contact after = [SELECT HS_Sync_Status__c FROM Contact WHERE Id = :c.Id];
+        System.assertEquals(PortalSyncConfig.STATUS_SYNCED, after.HS_Sync_Status__c);
+        System.assertEquals(0, [SELECT COUNT() FROM PortalSyncDeadLetter__c],
+            'archiving a stale link should succeed cleanly');
+    }
+
+    @isTest
+    static void associationFailureDeadLettersButRecordStaysSynced() {
+        // Association endpoints fail while the object upsert succeeds: the Contact
+        // still lands Synced, and the failed link is dead-lettered as ASSOCIATE.
+        HubSpotCalloutMock mock = new HubSpotCalloutMock();
+        mock.returnExisting = true;
+        mock.failAssociations = true;
+        Test.setMock(HttpCalloutMock.class, mock);
+        Account a = makeAccountFor('TriBU');
+        Contact c = makePendingContactWithAccount('TriBU', a.Id);
+        Test.startTest();
+        Database.executeBatch(new ContactOutboxBatch(), PortalSyncConfig.BATCH_SCOPE);
+        Test.stopTest();
+        Contact after = [SELECT HS_Sync_Status__c FROM Contact WHERE Id = :c.Id];
+        System.assertEquals(PortalSyncConfig.STATUS_SYNCED, after.HS_Sync_Status__c,
+            'an association failure must not fail the record whose fields synced');
+        System.assertEquals(1, [SELECT COUNT() FROM PortalSyncDeadLetter__c WHERE Operation__c = 'ASSOCIATE'],
+            'the failed association create should be dead-lettered');
+    }
+
+    @isTest
+    static void ocrTriggerReStampsContactPending() {
+        // Adding an OpportunityContactRole must re-stamp the related Contact Pending
+        // so the next outbox reasserts its deal associations, even though no mapped
+        // Contact field changed.
+        Contact c = new Contact(LastName = 'OcrStamp', Portal__c = 'TriBU');
+        insert c;
+        c.HS_Sync_Status__c = PortalSyncConfig.STATUS_SYNCED; // reach terminal state
+        update c;
+        Opportunity o = new Opportunity(
+            Name = 'OcrDeal', StageName = 'Prospecting', CloseDate = Date.today().addDays(30),
+            Portal__c = 'TriBU');
+        insert o;
+        Test.startTest();
+        insert new OpportunityContactRole(OpportunityId = o.Id, ContactId = c.Id);
+        Test.stopTest();
+        Contact after = [SELECT HS_Sync_Status__c FROM Contact WHERE Id = :c.Id];
+        System.assertEquals(PortalSyncConfig.STATUS_PENDING, after.HS_Sync_Status__c,
+            'a new OpportunityContactRole should re-stamp its Contact Pending');
+    }
+
+    @isTest
+    static void ocrDeleteReStampsContactPending() {
+        Contact c = new Contact(LastName = 'OcrDel', Portal__c = 'TriBU');
+        insert c;
+        Opportunity o = new Opportunity(
+            Name = 'OcrDelDeal', StageName = 'Prospecting', CloseDate = Date.today().addDays(30),
+            Portal__c = 'TriBU');
+        insert o;
+        OpportunityContactRole ocr = new OpportunityContactRole(OpportunityId = o.Id, ContactId = c.Id);
+        insert ocr;
+        c.HS_Sync_Status__c = PortalSyncConfig.STATUS_SYNCED; // reach terminal state
+        update c;
+        Test.startTest();
+        delete ocr;
+        Test.stopTest();
+        Contact after = [SELECT HS_Sync_Status__c FROM Contact WHERE Id = :c.Id];
+        System.assertEquals(PortalSyncConfig.STATUS_PENDING, after.HS_Sync_Status__c,
+            'removing an OpportunityContactRole should re-stamp its Contact Pending');
+    }
+
+    @isTest
+    static void reconciliationReassertsAssociations() {
+        // The nightly reconciliation batch also runs the association diff.
+        HubSpotCalloutMock mock = new HubSpotCalloutMock();
+        mock.returnExisting = true;
+        Test.setMock(HttpCalloutMock.class, mock);
+        Account a = makeAccountFor('TriBU');
+        insert new Contact(LastName = 'RecAssoc', Portal__c = 'TriBU', AccountId = a.Id);
+        Test.startTest();
+        Database.executeBatch(new PortalSyncReconciliationBatch('Contact', 30), PortalSyncConfig.BATCH_SCOPE);
+        Test.stopTest();
+        System.assertEquals(0, [SELECT COUNT() FROM PortalSyncDeadLetter__c]);
+    }
 }
