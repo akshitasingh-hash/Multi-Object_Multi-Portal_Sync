@@ -2,9 +2,9 @@
 <CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
     <fullName>HS_Last_Sync__c</fullName>
     <description>Timestamp of the last outbox sync attempt for this record.</description>
-    <externalId>false</externalId>
     <label>HS Last Sync</label>
     <required>false</required>
+    <trackFeedHistory>false</trackFeedHistory>
     <trackTrending>false</trackTrending>
     <type>DateTime</type>
 </CustomField>

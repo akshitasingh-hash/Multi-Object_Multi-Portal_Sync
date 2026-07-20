@@ -3,7 +3,7 @@
     <fullName>Portal__c</fullName>
     <label>Portal</label>
     <required>false</required>
-    <trackHistory>false</trackHistory>
+    <trackFeedHistory>false</trackFeedHistory>
     <type>MultiselectPicklist</type>
     <valueSet>
         <restricted>true</restricted>

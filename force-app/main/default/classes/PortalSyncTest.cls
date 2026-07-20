@@ -196,9 +196,9 @@ private class PortalSyncTest {
     @isTest
     static void multiselectSyncsEnabledPortalsOnly() {
         // Portal__c is a multiselect: value arrives semicolon-delimited. Include
-        // a disabled portal (Carl) to prove it is ignored, not archive-everywhere.
+        // a disabled portal (Carl Software) to prove it is ignored, not archive-everywhere.
         Test.setMock(HttpCalloutMock.class, new HubSpotCalloutMock());
-        Contact c = makePending('TriBU;Carl', true);
+        Contact c = makePending('TriBU;Carl Software', true);
         Test.startTest();
         Database.executeBatch(new ContactOutboxBatch(), PortalSyncConfig.BATCH_SCOPE);
         Test.stopTest();
@@ -211,7 +211,7 @@ private class PortalSyncTest {
     @isTest
     static void deleteWritesAndDrainsTombstone() {
         Test.setMock(HttpCalloutMock.class, new HubSpotCalloutMock());
-        Contact c = new Contact(LastName = 'Del', Portal__c = 'Spain');
+        Contact c = new Contact(LastName = 'Del', Portal__c = 'Berger-Levrault Spain');
         insert c;
         delete c; // after-delete trigger writes a tombstone
         System.assertEquals(1, [SELECT COUNT() FROM HS_Sync_Tombstone__c]);
@@ -225,7 +225,7 @@ private class PortalSyncTest {
     @isTest
     static void schedulerLaunchesBatches() {
         Test.setMock(HttpCalloutMock.class, new HubSpotCalloutMock());
-        makePending('Carl', false);
+        makePending('Carl Software', false);
         Test.startTest();
         new PortalSyncScheduler().execute(null);
         Test.stopTest();
@@ -288,7 +288,7 @@ private class PortalSyncTest {
         insert c;
         c.HS_Sync_Status__c = PortalSyncConfig.STATUS_SYNCED;
         update c;
-        c.Portal__c = 'Spain'; // a real portal move
+        c.Portal__c = 'Berger-Levrault Spain'; // a real portal move
         update c;
         Contact after = [SELECT HS_Sync_Status__c, HS_Portal_Changed__c FROM Contact WHERE Id = :c.Id];
         System.assertEquals(PortalSyncConfig.STATUS_PENDING, after.HS_Sync_Status__c,
@@ -300,7 +300,7 @@ private class PortalSyncTest {
     @isTest
     static void undeleteRestamps() {
         Test.setMock(HttpCalloutMock.class, new HubSpotCalloutMock());
-        Contact c = new Contact(LastName = 'Undel', Portal__c = 'Spain');
+        Contact c = new Contact(LastName = 'Undel', Portal__c = 'Berger-Levrault Spain');
         insert c;
         delete c;
         Test.startTest();
@@ -427,7 +427,7 @@ private class PortalSyncTest {
     @isTest
     static void accountDeleteWritesAndDrainsTombstone() {
         Test.setMock(HttpCalloutMock.class, new HubSpotCalloutMock());
-        Account a = new Account(Name = 'Del Co', Portal__c = 'Spain');
+        Account a = new Account(Name = 'Del Co', Portal__c = 'Berger-Levrault Spain');
         insert a;
         delete a; // after-delete trigger writes a tombstone tagged Account
         System.assertEquals(1, [SELECT COUNT() FROM HS_Sync_Tombstone__c WHERE SObject_Name__c = 'Account']);
@@ -441,7 +441,7 @@ private class PortalSyncTest {
     @isTest
     static void accountUndeleteRestamps() {
         Test.setMock(HttpCalloutMock.class, new HubSpotCalloutMock());
-        Account a = new Account(Name = 'Undel Co', Portal__c = 'Spain');
+        Account a = new Account(Name = 'Undel Co', Portal__c = 'Berger-Levrault Spain');
         insert a;
         delete a;
         Test.startTest();
@@ -583,7 +583,7 @@ private class PortalSyncTest {
         Test.setMock(HttpCalloutMock.class, new HubSpotCalloutMock());
         Opportunity o = new Opportunity(
             Name = 'Del Deal', StageName = 'Prospecting', CloseDate = Date.today().addDays(30),
-            Portal__c = 'Spain'
+            Portal__c = 'Berger-Levrault Spain'
         );
         insert o;
         delete o; // after-delete trigger writes a tombstone tagged Opportunity
@@ -600,7 +600,7 @@ private class PortalSyncTest {
         Test.setMock(HttpCalloutMock.class, new HubSpotCalloutMock());
         Opportunity o = new Opportunity(
             Name = 'Undel Deal', StageName = 'Prospecting', CloseDate = Date.today().addDays(30),
-            Portal__c = 'Spain'
+            Portal__c = 'Berger-Levrault Spain'
         );
         insert o;
         delete o;
@@ -741,7 +741,7 @@ private class PortalSyncTest {
     @isTest
     static void assetDeleteWritesAndDrainsTombstone() {
         Test.setMock(HttpCalloutMock.class, new HubSpotCalloutMock());
-        Asset asset = new Asset(Name = 'Del Widget', AccountId = parentAccountId(), Portal__c = 'Spain');
+        Asset asset = new Asset(Name = 'Del Widget', AccountId = parentAccountId(), Portal__c = 'Berger-Levrault Spain');
         insert asset;
         delete asset; // after-delete trigger writes a tombstone tagged Asset
         System.assertEquals(1, [SELECT COUNT() FROM HS_Sync_Tombstone__c WHERE SObject_Name__c = 'Asset']);
@@ -755,7 +755,7 @@ private class PortalSyncTest {
     @isTest
     static void assetUndeleteRestamps() {
         Test.setMock(HttpCalloutMock.class, new HubSpotCalloutMock());
-        Asset asset = new Asset(Name = 'Undel Widget', AccountId = parentAccountId(), Portal__c = 'Spain');
+        Asset asset = new Asset(Name = 'Undel Widget', AccountId = parentAccountId(), Portal__c = 'Berger-Levrault Spain');
         insert asset;
         delete asset;
         Test.startTest();

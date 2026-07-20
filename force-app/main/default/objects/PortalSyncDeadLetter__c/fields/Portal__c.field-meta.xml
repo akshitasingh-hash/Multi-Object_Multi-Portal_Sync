@@ -10,9 +10,9 @@
         <valueSetDefinition>
             <sorted>false</sorted>
             <value>
-                <fullName>Carl</fullName>
+                <fullName>Carl Software</fullName>
                 <default>false</default>
-                <label>Carl</label>
+                <label>Carl Software</label>
             </value>
             <value>
                 <fullName>TriBU</fullName>
@@ -20,9 +20,9 @@
                 <label>TriBU</label>
             </value>
             <value>
-                <fullName>Spain</fullName>
+                <fullName>Berger-Levrault Spain</fullName>
                 <default>false</default>
-                <label>Spain</label>
+                <label>Berger-Levrault Spain</label>
             </value>
         </valueSetDefinition>
     </valueSet>

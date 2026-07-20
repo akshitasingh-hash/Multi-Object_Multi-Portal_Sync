@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
     <fullName>Outbox_Batch_Class__c</fullName>
-    <description>Apex class the scheduler launches to drain this object's outbox (e.g. ContactOutboxBatch, AccountOutboxBatch). A distinct class per object gives the scheduler a per-object overlap guard keyed on ApexClass.Name.</description>
+    <description>Apex class the scheduler launches to drain this object&apos;s outbox (e.g. ContactOutboxBatch, AccountOutboxBatch). A distinct class per object gives the scheduler a per-object overlap guard keyed on ApexClass.Name.</description>
     <externalId>false</externalId>
     <fieldManageability>SubscriberControlled</fieldManageability>
     <label>Outbox Batch Class</label>

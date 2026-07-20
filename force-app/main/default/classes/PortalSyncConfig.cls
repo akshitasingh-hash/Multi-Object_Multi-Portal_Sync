@@ -17,18 +17,18 @@ public with sharing class PortalSyncConfig {
     // and it is ignored when parsing a record's portal field). Shared by every
     // synced object. Re-enable by uncommenting.
     public static final Map<String, String> PORTAL_TO_NAMED_CREDENTIAL = new Map<String, String>{
-        'Carl'  => 'HubSpot_Carl',
+        'Carl Software'  => 'HubSpot_Carl',
         'TriBU' => 'HubSpot_TriBU',
-        'Spain' => 'HubSpot_Spain'
+        'Berger-Levrault Spain' => 'HubSpot_Spain'
     };
 
     // Portal value -> the HubSpot_Field_Mapping__mdt checkbox that gates whether a
     // field syncs to THAT portal. Every enabled portal in PORTAL_TO_NAMED_CREDENTIAL
     // needs an entry here; a portal missing from this map syncs no fields at all.
     private static final Map<String, String> PORTAL_TO_SYNC_FIELD = new Map<String, String>{
-        'Carl'  => 'Syncs_To_CARL__c',
+        'Carl Software'  => 'Syncs_To_CARL__c',
         'TriBU' => 'Syncs_To_TriBU__c',
-        'Spain' => 'Syncs_To_Spain__c'
+        'Berger-Levrault Spain' => 'Syncs_To_Spain__c'
     };
 
     // Outbox status values (per-object status field and tombstone Status__c).

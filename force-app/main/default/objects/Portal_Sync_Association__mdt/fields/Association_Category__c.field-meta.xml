@@ -2,6 +2,7 @@
 <CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
     <fullName>Association_Category__c</fullName>
     <description>HubSpot association category for the type below: HUBSPOT_DEFINED for built-in default associations, USER_DEFINED for custom labels. Defaults to HUBSPOT_DEFINED.</description>
+    <externalId>false</externalId>
     <fieldManageability>SubscriberControlled</fieldManageability>
     <label>Association Category</label>
     <length>20</length>

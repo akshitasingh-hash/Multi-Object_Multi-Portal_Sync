@@ -3,8 +3,8 @@
     <fullName>HS_Portal_Changed__c</fullName>
     <defaultValue>false</defaultValue>
     <description>Set when Portal__c actually changed, so the outbox archives the record from the portals it left. Cleared once synced.</description>
-    <externalId>false</externalId>
     <label>HS Portal Changed</label>
+    <trackFeedHistory>false</trackFeedHistory>
     <trackTrending>false</trackTrending>
     <type>Checkbox</type>
 </CustomField>

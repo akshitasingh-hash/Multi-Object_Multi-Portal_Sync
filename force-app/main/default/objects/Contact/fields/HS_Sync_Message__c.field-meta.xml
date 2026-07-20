@@ -1,13 +1,11 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
     <fullName>HS_Sync_Message__c</fullName>
-    <description>Human-readable note about the last sync outcome (e.g. a pointer to PortalSyncDeadLetter for failures).</description>
     <externalId>false</externalId>
-    <label>HS Sync Message</label>
+    <label>Sync Message</label>
     <length>255</length>
     <required>false</required>
     <trackFeedHistory>false</trackFeedHistory>
-    <trackTrending>false</trackTrending>
     <type>Text</type>
     <unique>false</unique>
 </CustomField>
