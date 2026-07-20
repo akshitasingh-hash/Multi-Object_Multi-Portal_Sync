@@ -107,6 +107,7 @@
         <members>HubSpot_Field_Mapping.Title</members>
         <members>Portal_Sync_Association.Contact_Account</members>
         <members>Portal_Sync_Association.Contact_Opportunity</members>
+        <members>Portal_Sync_Association.Opportunity_Contact</members>
         <members>Portal_Sync_Object.Account</members>
         <members>Portal_Sync_Object.Asset</members>
         <members>Portal_Sync_Object.Contact</members>

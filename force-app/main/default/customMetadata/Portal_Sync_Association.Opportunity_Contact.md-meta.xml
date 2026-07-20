@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomMetadata xmlns="http://soap.sforce.com/2006/04/metadata" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+    <label>Opportunity to Contact</label>
+    <protected>false</protected>
+    <values>
+        <field>Active__c</field>
+        <value xsi:type="xsd:boolean">true</value>
+    </values>
+    <values>
+        <field>Association_Category__c</field>
+        <value xsi:type="xsd:string">HUBSPOT_DEFINED</value>
+    </values>
+    <values>
+        <field>Association_Type_Id__c</field>
+        <value xsi:type="xsd:double">3.0</value>
+    </values>
+    <values>
+        <field>From_Object__c</field>
+        <value xsi:type="xsd:string">Opportunity</value>
+    </values>
+    <values>
+        <field>Junction_From_Field__c</field>
+        <value xsi:type="xsd:string">OpportunityId</value>
+    </values>
+    <values>
+        <field>Junction_Object__c</field>
+        <value xsi:type="xsd:string">OpportunityContactRole</value>
+    </values>
+    <values>
+        <field>Junction_To_Field__c</field>
+        <value xsi:type="xsd:string">ContactId</value>
+    </values>
+    <values>
+        <field>Relationship_Field__c</field>
+        <value xsi:nil="true"/>
+    </values>
+    <values>
+        <field>Source_Type__c</field>
+        <value xsi:type="xsd:string">Junction</value>
+    </values>
+    <values>
+        <field>Syncs_To_CARL__c</field>
+        <value xsi:type="xsd:boolean">true</value>
+    </values>
+    <values>
+        <field>Syncs_To_Spain__c</field>
+        <value xsi:type="xsd:boolean">true</value>
+    </values>
+    <values>
+        <field>Syncs_To_TriBU__c</field>
+        <value xsi:type="xsd:boolean">true</value>
+    </values>
+    <values>
+        <field>To_Object__c</field>
+        <value xsi:type="xsd:string">Contact</value>
+    </values>
+</CustomMetadata>
