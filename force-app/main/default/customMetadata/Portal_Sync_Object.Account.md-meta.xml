@@ -12,7 +12,7 @@
     </values>
     <values>
         <field>SF_Id_Property__c</field>
-        <value xsi:type="xsd:string">account_id_sf</value>
+        <value xsi:type="xsd:string">salesforceaccountid_bl</value>
     </values>
     <values>
         <field>Portal_Field__c</field>
