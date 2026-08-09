@@ -31,6 +31,7 @@ public with sharing class PortalSyncReconciliationBatch
         Set<String> fields = new Set<String>{ 'Id', cfg.portalField };
         fields.addAll(PortalSyncConfig.mappedSfFields(cfg.sObjectName));
         fields.addAll(PortalSyncConfig.associationSourceFields(cfg.sObjectName));
+        if (cfg.syncOwner) fields.add('Owner.Email');
         return Database.getQueryLocator(
             'SELECT ' + String.join(new List<String>(fields), ', ') +
             ' FROM ' + cfg.sObjectName + ' WHERE LastModifiedDate = LAST_N_DAYS:' + this.lookbackDays

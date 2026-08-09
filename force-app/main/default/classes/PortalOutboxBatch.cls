@@ -42,6 +42,8 @@ public virtual with sharing class PortalOutboxBatch
         // Lookup-source association FKs (e.g. AccountId) so the association pass
         // can read the related record id without a second query.
         fields.addAll(PortalSyncConfig.associationSourceFields(cfg.sObjectName));
+        // Owner's email, needed to resolve hubspot_owner_id per portal.
+        if (cfg.syncOwner) fields.add('Owner.Email');
 
         String soql =
             'SELECT ' + String.join(new List<String>(fields), ', ') +

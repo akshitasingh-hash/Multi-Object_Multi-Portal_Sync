@@ -91,6 +91,7 @@
         <members>Portal_Sync_Object__mdt.SF_Id_Property__c</members>
         <members>Portal_Sync_Object__mdt.SObject_API_Name__c</members>
         <members>Portal_Sync_Object__mdt.Sync_Message_Field__c</members>
+        <members>Portal_Sync_Object__mdt.Sync_Owner__c</members>
         <members>Portal_Sync_Object__mdt.Sync_Status_Field__c</members>
         <name>CustomField</name>
     </types>

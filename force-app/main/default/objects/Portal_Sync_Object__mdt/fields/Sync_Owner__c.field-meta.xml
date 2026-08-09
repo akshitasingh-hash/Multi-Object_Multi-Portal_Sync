@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Sync_Owner__c</fullName>
+    <defaultValue>false</defaultValue>
+    <description>When checked, the record&apos;s Owner is resolved by email to a HubSpot owner and sent as hubspot_owner_id on every portal the record targets. Owner ids are portal-specific; unresolved emails are skipped and self-heal on the next pass.</description>
+    <fieldManageability>SubscriberControlled</fieldManageability>
+    <label>Sync Owner</label>
+    <type>Checkbox</type>
+</CustomField>

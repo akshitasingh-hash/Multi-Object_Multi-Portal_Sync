@@ -171,6 +171,50 @@ public with sharing class HubSpotService {
         return hsIdBySfId;
     }
 
+    // ---- Owners (CRM v3) ----------------------------------------------------
+    // HubSpot owners are global to a portal (not per-object), so this is one GET
+    // per portal -- not per record -- regardless of how many distinct emails
+    // appear in a chunk. Paginated via the standard v3 cursor (paging.next.after).
+
+    /** email (lowercased) -> HubSpot owner id, for every non-archived owner in
+     *  this portal. On a callout error or non-2xx response, records one entry in
+     *  `failed` and returns whatever was accumulated so far (the caller must not
+     *  fail individual records over this -- see PortalRouter). */
+    public static Map<String, String> ownerIdsByEmail(String portalValue, Map<String, String> failed) {
+        Map<String, String> byEmail = new Map<String, String>();
+        String after = null;
+        do {
+            String path = '/crm/v3/owners?limit=100'
+                + (after != null ? '&after=' + EncodingUtil.urlEncode(after, 'UTF-8') : '');
+            HttpResponse res;
+            try {
+                res = send(portalValue, 'GET', path, null);
+            } catch (Exception e) {
+                failed.put(portalValue, 'OWNERS callout error: ' + e.getMessage());
+                return byEmail;
+            }
+            if (!isOk(res)) {
+                failed.put(portalValue, 'OWNERS ' + errorDetail(res));
+                return byEmail;
+            }
+            Map<String, Object> parsed = (Map<String, Object>) JSON.deserializeUntyped(res.getBody());
+            List<Object> results = (List<Object>) parsed.get('results');
+            if (results != null) {
+                for (Object o : results) {
+                    Map<String, Object> owner = (Map<String, Object>) o;
+                    if (owner.get('archived') == true) continue;
+                    String email = (String) owner.get('email');
+                    Object id = owner.get('id');
+                    if (email != null && id != null) byEmail.put(email.toLowerCase(), String.valueOf(id));
+                }
+            }
+            Map<String, Object> paging = (Map<String, Object>) parsed.get('paging');
+            Map<String, Object> next = (paging != null) ? (Map<String, Object>) paging.get('next') : null;
+            after = (next != null) ? (String) next.get('after') : null;
+        } while (after != null);
+        return byEmail;
+    }
+
     // ---- Associations (CRM v4) ---------------------------------------------
     // Associations LINK two records by their HubSpot object ids (not by sf-id),
     // so both ends must already exist in the portal -- the caller resolves each

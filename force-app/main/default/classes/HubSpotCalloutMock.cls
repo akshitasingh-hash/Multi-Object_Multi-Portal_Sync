@@ -27,12 +27,43 @@ public class HubSpotCalloutMock implements HttpCalloutMock {
     // produces an archive.
     public Boolean returnExistingAssociations = false;
 
+    // Owner resolution (/crm/v3/owners): when set, the owners list returns one
+    // owner with this email/id; leave null to simulate no matching owner.
+    public String ownerEmailToMatch = null;
+    public String ownerHsId = '555001';
+
+    // Flip to make the owners list endpoint return 500, exercising the
+    // "don't fail the record over an unresolved owner" path.
+    public Boolean failOwners = false;
+
+    // sfId -> the properties map actually sent on the last /batch/upsert call,
+    // so tests can assert on the parsed payload (e.g. hubspot_owner_id) rather
+    // than raw JSON.
+    public Map<String, Map<String, Object>> capturedUpsertProps = new Map<String, Map<String, Object>>();
+
     public HttpResponse respond(HttpRequest req) {
         HttpResponse res = new HttpResponse();
         res.setHeader('Content-Type', 'application/json');
 
         String endpoint = req.getEndpoint();
         Boolean isAssoc = endpoint.contains('/crm/v4/associations/');
+        Boolean isOwners = endpoint.contains('/crm/v3/owners');
+        if (isOwners) {
+            if (failOwners) {
+                res.setStatusCode(500);
+                res.setBody('{"status":"error","message":"simulated owners failure"}');
+                return res;
+            }
+            List<Object> results = new List<Object>();
+            if (ownerEmailToMatch != null) {
+                results.add(new Map<String, Object>{
+                    'id' => ownerHsId, 'email' => ownerEmailToMatch, 'archived' => false
+                });
+            }
+            res.setStatusCode(200);
+            res.setBody(JSON.serialize(new Map<String, Object>{ 'results' => results }));
+            return res;
+        }
         if (throwCallout && endpoint.contains('/batch/')) {
             // Simulate a timeout / connection / auth error at the callout layer.
             throw new CalloutException('simulated callout failure');
@@ -58,6 +89,7 @@ public class HubSpotCalloutMock implements HttpCalloutMock {
             return res;
         }
         if (endpoint.endsWith('/batch/upsert')) {
+            captureUpsertProps(req.getBody());
             if (partialUpsert) {
                 // 207 multi-status: echo all inputs except the first (which failed).
                 res.setStatusCode(207);
@@ -144,5 +176,19 @@ public class HubSpotCalloutMock implements HttpCalloutMock {
             }
         }
         return JSON.serialize(new Map<String, Object>{ 'results' => results });
+    }
+
+    // Record the properties actually sent per sfId on a /batch/upsert call, so
+    // tests can assert on the parsed payload (e.g. hubspot_owner_id) instead of
+    // raw JSON.
+    private void captureUpsertProps(String requestBody) {
+        Map<String, Object> parsed = (Map<String, Object>) JSON.deserializeUntyped(requestBody);
+        List<Object> inputs = (List<Object>) parsed.get('inputs');
+        if (inputs == null) return;
+        for (Object o : inputs) {
+            Map<String, Object> input = (Map<String, Object>) o;
+            String sfId = String.valueOf(input.get('id'));
+            capturedUpsertProps.put(sfId, (Map<String, Object>) input.get('properties'));
+        }
     }
 }

@@ -63,6 +63,7 @@ public with sharing class PortalSyncConfig {
         public String syncMessageField;   // human-readable message field API name
         public String outboxBatchClass;   // Apex class the scheduler launches
         public Boolean active;
+        public Boolean syncOwner;         // resolve Owner by email -> hubspot_owner_id on every portal
     }
 
     // Loaded lazily and cached for the life of the transaction. getAll() does not
@@ -86,6 +87,7 @@ public with sharing class PortalSyncConfig {
                 cfg.syncMessageField   = o.Sync_Message_Field__c;
                 cfg.outboxBatchClass   = o.Outbox_Batch_Class__c;
                 cfg.active             = (o.Active__c == true);
+                cfg.syncOwner          = (o.Sync_Owner__c == true);
                 objectConfigsByName.put(cfg.sObjectName, cfg);
             }
         }

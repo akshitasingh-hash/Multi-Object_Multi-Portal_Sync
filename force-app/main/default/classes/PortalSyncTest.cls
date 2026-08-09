@@ -918,4 +918,75 @@ private class PortalSyncTest {
         Test.stopTest();
         System.assertEquals(0, [SELECT COUNT() FROM PortalSyncDeadLetter__c]);
     }
+
+    // ---- Owner sync: hubspot_owner_id ---------------------------------------
+    // Portal_Sync_Object__mdt.Sync_Owner__c (set true for Contact) resolves the
+    // record's Owner by email to a HubSpot owner and sends it as
+    // hubspot_owner_id alongside the mapped fields on the same upsert payload.
+
+    @isTest
+    static void ownerSyncSetsHubspotOwnerIdOnUpsert() {
+        HubSpotCalloutMock mock = new HubSpotCalloutMock();
+        mock.ownerEmailToMatch = UserInfo.getUserEmail(); // test records default OwnerId to the running user
+        Test.setMock(HttpCalloutMock.class, mock);
+        Contact c = makePending('TriBU', false);
+        Test.startTest();
+        Database.executeBatch(new ContactOutboxBatch(), PortalSyncConfig.BATCH_SCOPE);
+        Test.stopTest();
+        Contact after = [SELECT HS_Sync_Status__c FROM Contact WHERE Id = :c.Id];
+        System.assertEquals(PortalSyncConfig.STATUS_SYNCED, after.HS_Sync_Status__c);
+        Map<String, Object> props = mock.capturedUpsertProps.get(c.Id);
+        System.assertNotEquals(null, props, 'the upsert payload for this contact should have been captured');
+        System.assertEquals(mock.ownerHsId, props.get('hubspot_owner_id'),
+            'the resolved HubSpot owner id should be sent as hubspot_owner_id');
+    }
+
+    @isTest
+    static void ownerSyncSkipsPropertyWhenEmailUnresolved() {
+        HubSpotCalloutMock mock = new HubSpotCalloutMock(); // ownerEmailToMatch left null -> no match
+        Test.setMock(HttpCalloutMock.class, mock);
+        Contact c = makePending('TriBU', false);
+        Test.startTest();
+        Database.executeBatch(new ContactOutboxBatch(), PortalSyncConfig.BATCH_SCOPE);
+        Test.stopTest();
+        Contact after = [SELECT HS_Sync_Status__c FROM Contact WHERE Id = :c.Id];
+        System.assertEquals(PortalSyncConfig.STATUS_SYNCED, after.HS_Sync_Status__c,
+            'an unresolved owner must not fail the record');
+        Map<String, Object> props = mock.capturedUpsertProps.get(c.Id);
+        System.assert(!props.containsKey('hubspot_owner_id'),
+            'no owner matched -> hubspot_owner_id should be omitted');
+        System.assertEquals(0, [SELECT COUNT() FROM PortalSyncDeadLetter__c]);
+    }
+
+    @isTest
+    static void ownerSyncFailureDoesNotFailRecordButDeadLetters() {
+        HubSpotCalloutMock mock = new HubSpotCalloutMock();
+        mock.failOwners = true;
+        Test.setMock(HttpCalloutMock.class, mock);
+        Contact c = makePending('TriBU', false);
+        Test.startTest();
+        Database.executeBatch(new ContactOutboxBatch(), PortalSyncConfig.BATCH_SCOPE);
+        Test.stopTest();
+        Contact after = [SELECT HS_Sync_Status__c FROM Contact WHERE Id = :c.Id];
+        System.assertEquals(PortalSyncConfig.STATUS_SYNCED, after.HS_Sync_Status__c,
+            'an owners-list failure must not fail the record whose fields synced');
+        List<PortalSyncDeadLetter__c> dead = [
+            SELECT Operation__c FROM PortalSyncDeadLetter__c WHERE Operation__c = 'OWNER_RESOLVE'
+        ];
+        System.assertEquals(1, dead.size(), 'the failed owners lookup should be dead-lettered once per portal');
+    }
+
+    @isTest
+    static void handlerStampsPendingOnOwnerChange() {
+        // Direct unit test of PortalSyncHandler, not the trigger -- avoids
+        // depending on a second active User existing in the org (a real
+        // reassignment needs one; this only needs OwnerId to differ in memory).
+        PortalSyncConfig.ObjectConfig cfg = PortalSyncConfig.objectConfig('Contact');
+        Contact prior   = new Contact(Id = '003000000000000AAA', OwnerId = '005000000000000AAA', Portal__c = 'TriBU');
+        Contact updated = new Contact(Id = '003000000000000AAA', OwnerId = '005000000000000BAA', Portal__c = 'TriBU');
+        Map<Id, SObject> oldMap = new Map<Id, SObject>{ prior.Id => prior };
+        PortalSyncHandler.stampForSync(cfg, new List<SObject>{ updated }, oldMap);
+        System.assertEquals(PortalSyncConfig.STATUS_PENDING, updated.get('HS_Sync_Status__c'),
+            'an owner reassignment should re-stamp Pending when owner sync is active');
+    }
 }

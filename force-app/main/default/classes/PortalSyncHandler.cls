@@ -34,7 +34,8 @@ public with sharing class PortalSyncHandler {
                 for (String f : mappedFields) {
                     if (record.get(f) != prior.get(f)) { mappedChanged = true; break; }
                 }
-                stamp = portalChanged || mappedChanged;
+                Boolean ownerChanged = cfg.syncOwner && (record.get('OwnerId') != prior.get('OwnerId'));
+                stamp = portalChanged || mappedChanged || ownerChanged;
             }
 
             if (!stamp) continue;

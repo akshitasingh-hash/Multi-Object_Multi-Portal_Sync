@@ -31,6 +31,11 @@ public with sharing class PortalRouter {
 
         List<String> enabled = PortalSyncConfig.allPortalValues();
 
+        // Owner ids only mean something within one HubSpot account, so this is
+        // fetched per portal, lazily -- only the first time a portal is actually
+        // touched below, not eagerly for every enabled portal up front.
+        Map<String, Map<String, String>> ownerMapByPortal = new Map<String, Map<String, String>>();
+
         for (SObject record : records) {
             String sfId = record.Id;
             result.put(record.Id, true);
@@ -50,7 +55,22 @@ public with sharing class PortalRouter {
                 if (!upsertByPortal.containsKey(p)) {
                     upsertByPortal.put(p, new Map<String, Map<String, Object>>());
                 }
-                upsertByPortal.get(p).put(sfId, HubSpotService.mapProperties(record, cfg.sObjectName, p));
+                Map<String, Object> props = HubSpotService.mapProperties(record, cfg.sObjectName, p);
+                if (cfg.syncOwner) {
+                    if (!ownerMapByPortal.containsKey(p)) {
+                        Map<String, String> ownerFailed = new Map<String, String>();
+                        ownerMapByPortal.put(p, HubSpotService.ownerIdsByEmail(p, ownerFailed));
+                        for (String detail : ownerFailed.values()) {
+                            PortalSyncDeadLetter.log(cfg.sObjectName, 'OWNERS', p, 'OWNER_RESOLVE', detail);
+                        }
+                    }
+                    String ownerEmail = ownerEmailOf(record);
+                    if (ownerEmail != null) {
+                        String hsOwnerId = ownerMapByPortal.get(p).get(ownerEmail.toLowerCase());
+                        if (hsOwnerId != null) props.put('hubspot_owner_id', hsOwnerId);
+                    }
+                }
+                upsertByPortal.get(p).put(sfId, props);
             }
             if (archiveOthers) {
                 for (String p : enabled) {
@@ -99,5 +119,11 @@ public with sharing class PortalRouter {
     private static void addTo(Map<String, Set<String>> m, String portal, String sfId) {
         if (!m.containsKey(portal)) m.put(portal, new Set<String>());
         m.get(portal).add(sfId);
+    }
+
+    /** The record's Owner's email, or null if Owner.Email wasn't queried/set. */
+    private static String ownerEmailOf(SObject record) {
+        SObject owner = record.getSObject('Owner');
+        return (owner != null) ? (String) owner.get('Email') : null;
     }
 }
