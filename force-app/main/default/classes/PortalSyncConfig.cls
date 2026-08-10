@@ -31,6 +31,19 @@ public with sharing class PortalSyncConfig {
         'Berger-Levrault Spain' => 'Syncs_To_Spain__c'
     };
 
+    // Portal value -> the Portal_Sync_Association__mdt Number field holding THAT
+    // portal's HubSpot association type id. Ids for custom objects and for
+    // USER_DEFINED labels are generated inside each portal, so the same logical
+    // link (e.g. Asset -> Account) carries a different type id in TriBU, CARL and
+    // Spain. A portal whose override is blank falls back to the shared
+    // Association_Type_Id__c -- correct for HUBSPOT_DEFINED ids, which are stable
+    // across portals. A portal missing from this map can only use the fallback.
+    private static final Map<String, String> PORTAL_TO_ASSOC_TYPE_FIELD = new Map<String, String>{
+        'Carl Software'  => 'Association_Type_Id_CARL__c',
+        'TriBU' => 'Association_Type_Id_TriBU__c',
+        'Berger-Levrault Spain' => 'Association_Type_Id_Spain__c'
+    };
+
     // Outbox status values (per-object status field and tombstone Status__c).
     public static final String STATUS_PENDING    = 'Pending';
     public static final String STATUS_PROCESSING = 'Processing';
@@ -199,12 +212,36 @@ public with sharing class PortalSyncConfig {
         public String junctionFromField;   // Junction: FK -> From record id
         public String junctionToField;     // Junction: FK -> To record id
         public String associationCategory; // HUBSPOT_DEFINED | USER_DEFINED
-        public Integer associationTypeId;  // HubSpot association type id
+        public Integer defaultTypeId;      // Association_Type_Id__c -- fallback for every portal
+        public Map<String, Integer> typeIdByPortal = new Map<String, Integer>(); // per-portal overrides
         public Map<String, Boolean> portalOptIn = new Map<String, Boolean>();
         public Boolean active;
 
         public Boolean isJunction() { return 'Junction'.equalsIgnoreCase(sourceType); }
         public Boolean syncsTo(String portal) { return portalOptIn.get(portal) == true; }
+
+        /**
+         * The association type id to assert in ONE portal: that portal's override
+         * if set, else the shared default. Always ask per portal -- never read
+         * defaultTypeId directly -- because custom-object ids differ per portal.
+         *
+         * Null when neither is configured. The router must then skip the portal
+         * rather than guess: a null type id matches EVERY existing association
+         * type on read, which would let the diff archive links this row does not
+         * own (and HubSpot rejects a create with no type id anyway).
+         */
+        public Integer typeIdFor(String portal) {
+            Integer own = typeIdByPortal.get(portal);
+            return (own != null) ? own : defaultTypeId;
+        }
+    }
+
+    /** A HubSpot association type id is a positive integer, so 0 -- the "not
+     *  looked up yet" placeholder in seeded rows -- reads the same as blank. */
+    private static Integer assocTypeId(Object raw) {
+        if (raw == null) return null;
+        Decimal value = (Decimal) raw;
+        return (value <= 0) ? null : value.intValue();
     }
 
     // Loaded lazily and cached for the transaction. from-object name -> its rows.
@@ -217,6 +254,8 @@ public with sharing class PortalSyncConfig {
                     SELECT Source_Type__c, Relationship_Field__c, Junction_Object__c,
                            Junction_From_Field__c, Junction_To_Field__c,
                            Association_Category__c, Association_Type_Id__c, Active__c,
+                           Association_Type_Id_TriBU__c, Association_Type_Id_CARL__c,
+                           Association_Type_Id_Spain__c,
                            Syncs_To_TriBU__c, Syncs_To_CARL__c, Syncs_To_Spain__c,
                            From_Object__r.SObject_API_Name__c, From_Object__r.HubSpot_Object_Path__c,
                            From_Object__r.SF_Id_Property__c, From_Object__r.Active__c,
@@ -244,12 +283,18 @@ public with sharing class PortalSyncConfig {
                 cfg.junctionToField    = a.Junction_To_Field__c;
                 cfg.associationCategory = String.isBlank(a.Association_Category__c)
                     ? 'HUBSPOT_DEFINED' : a.Association_Category__c;
-                cfg.associationTypeId  = (a.Association_Type_Id__c == null)
-                    ? null : a.Association_Type_Id__c.intValue();
+                cfg.defaultTypeId      = assocTypeId(a.Association_Type_Id__c);
                 cfg.active             = (a.Active__c == true);
                 for (String portal : PORTAL_TO_SYNC_FIELD.keySet()) {
                     Object opt = a.get(PORTAL_TO_SYNC_FIELD.get(portal));
                     cfg.portalOptIn.put(portal, opt != null && (Boolean) opt);
+                    // Only record a real override; a blank one must fall through
+                    // to defaultTypeId, not shadow it with null.
+                    String typeIdField = PORTAL_TO_ASSOC_TYPE_FIELD.get(portal);
+                    if (typeIdField != null) {
+                        Integer own = assocTypeId(a.get(typeIdField));
+                        if (own != null) cfg.typeIdByPortal.put(portal, own);
+                    }
                 }
                 if (!associationsByFrom.containsKey(cfg.fromObject)) {
                     associationsByFrom.put(cfg.fromObject, new List<AssociationConfig>());

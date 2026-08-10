@@ -989,4 +989,50 @@ private class PortalSyncTest {
         System.assertEquals(PortalSyncConfig.STATUS_PENDING, updated.get('HS_Sync_Status__c'),
             'an owner reassignment should re-stamp Pending when owner sync is active');
     }
+
+    // ---- Per-portal association type ids ------------------------------------
+    // HubSpot generates the association type id inside each portal for custom
+    // objects and USER_DEFINED labels, so one config row can legitimately carry a
+    // different id per portal (Association_Type_Id_TriBU__c / _CARL__c / _Spain__c)
+    // layered over the shared Association_Type_Id__c fallback. Direct unit tests of
+    // AssociationConfig -- custom metadata rows cannot be created in a test.
+
+    @isTest
+    static void associationTypeIdPrefersThePortalOverride() {
+        PortalSyncConfig.AssociationConfig a = new PortalSyncConfig.AssociationConfig();
+        a.defaultTypeId = 279;
+        a.typeIdByPortal.put('TriBU', 12345);
+        System.assertEquals(12345, a.typeIdFor('TriBU'),
+            'the portal override wins wherever it is set');
+        System.assertEquals(279, a.typeIdFor('Carl Software'),
+            'a portal with no override falls back to the shared id');
+    }
+
+    @isTest
+    static void associationTypeIdIsNullWhenNeitherIsConfigured() {
+        // Null is what makes the router SKIP the portal instead of asserting an
+        // association of an unknown type -- a null type id matches every existing
+        // type on read, so the diff could archive links this row does not own.
+        PortalSyncConfig.AssociationConfig a = new PortalSyncConfig.AssociationConfig();
+        for (String portal : PortalSyncConfig.allPortalValues()) {
+            System.assertEquals(null, a.typeIdFor(portal),
+                'an unconfigured association must resolve no type id for ' + portal);
+        }
+    }
+
+    @isTest
+    static void seededContactAssociationsResolveATypeIdForEveryOptedInPortal() {
+        // The Contact rows are HUBSPOT_DEFINED with stable ids in the shared field
+        // and no per-portal overrides: proof the fallback still feeds every portal,
+        // i.e. adding the override fields did not silently disable them.
+        List<PortalSyncConfig.AssociationConfig> assocs = PortalSyncConfig.associationsFrom('Contact');
+        System.assert(!assocs.isEmpty(), 'expected the seeded Contact associations to be active');
+        for (PortalSyncConfig.AssociationConfig a : assocs) {
+            for (String portal : PortalSyncConfig.allPortalValues()) {
+                if (!a.syncsTo(portal)) continue;
+                System.assertNotEquals(null, a.typeIdFor(portal),
+                    a.fromObject + '->' + a.toObject + ' resolves no type id for ' + portal);
+            }
+        }
+    }
 }

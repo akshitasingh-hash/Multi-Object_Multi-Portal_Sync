@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
     <fullName>Association_Type_Id__c</fullName>
-    <description>HubSpot association type id for this association. For HUBSPOT_DEFINED defaults these are stable across portals (e.g. Contact-to-Company 279, Contact-to-Deal 4). Confirm per portal via GET /crm/v4/associations/{from}/{to}/labels.</description>
+    <description>Default HubSpot association type id, used by every portal that has no per-portal override (Association_Type_Id_TriBU__c / _CARL__c / _Spain__c). Suitable on its own for HUBSPOT_DEFINED defaults, whose ids are stable across portals (e.g. Contact-to-Company 279, Contact-to-Deal 4). Custom-object and USER_DEFINED label ids are generated per portal - leave this blank and fill the per-portal fields instead. Confirm ids via GET /crm/v4/associations/{from}/{to}/labels in each portal.</description>
     <externalId>false</externalId>
     <fieldManageability>SubscriberControlled</fieldManageability>
     <label>Association Type Id</label>

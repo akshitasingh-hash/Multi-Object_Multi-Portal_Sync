@@ -17,7 +17,10 @@
  * safe on any scope and needs no ordering guarantee between object outboxes.
  *
  * Portal isolation is automatic: ids are resolved within a single portal's Named
- * Credential, so a portal only ever links its own records.
+ * Credential, so a portal only ever links its own records. The association TYPE
+ * id is portal-scoped too (HubSpot generates it per portal for custom objects and
+ * USER_DEFINED labels), so it is resolved via AssociationConfig.typeIdFor(portal);
+ * a portal with no id configured is skipped, never guessed.
  *
  * Failures are BUFFERED in PortalSyncDeadLetter (Operation ASSOCIATE / DISASSOCIATE)
  * and never flip the from-record's sync status -- the field sync already
@@ -93,6 +96,20 @@ public with sharing class PortalAssociationRouter {
         }
         if (fromSfIds.isEmpty()) return;
 
+        // The association TYPE id is portal-scoped: HubSpot generates it inside
+        // each portal for custom objects and USER_DEFINED labels, so one config row
+        // can legitimately carry a different id per portal. Without this portal's
+        // id we cannot tell the links this row owns from links of any other type,
+        // so assert nothing here rather than risk archiving someone else's. Logged
+        // once per portal per batch chunk, and only when there was work to do.
+        Integer typeId = a.typeIdFor(portal);
+        if (typeId == null) {
+            PortalSyncDeadLetter.log(a.fromObject, 'ASSOC_CONFIG', portal, 'ASSOCIATE',
+                a.fromObject + '->' + a.toObject
+                + ' skipped: no association type id configured for this portal');
+            return;
+        }
+
         // Resolve both ends to HubSpot ids in this portal.
         Map<String, String> fromResolveFailed = new Map<String, String>();
         Map<String, String> fromHsBySf = resolveAll(fromCfg, portal, fromSfIds, fromResolveFailed);
@@ -117,7 +134,7 @@ public with sharing class PortalAssociationRouter {
         Map<String, String> readFailed = new Map<String, String>();
         Map<String, Set<String>> existingByFromHs = HubSpotService.batchReadAssociations(
             a.fromHubSpotPath, a.toHubSpotPath, portal, fromHsIds,
-            a.associationCategory, a.associationTypeId, readFailed);
+            a.associationCategory, typeId, readFailed);
 
         List<HubSpotService.AssocInput> toCreate = new List<HubSpotService.AssocInput>();
         List<HubSpotService.AssocInput> toArchive = new List<HubSpotService.AssocInput>();
@@ -157,7 +174,7 @@ public with sharing class PortalAssociationRouter {
         if (!toCreate.isEmpty()) {
             Map<String, String> failed = HubSpotService.batchCreateAssociations(
                 a.fromHubSpotPath, a.toHubSpotPath, portal,
-                a.associationCategory, a.associationTypeId, toCreate);
+                a.associationCategory, typeId, toCreate);
             logFailures(a, portal, 'ASSOCIATE', failed, fromSfByHs);
         }
         if (!toArchive.isEmpty()) {
