@@ -1035,4 +1035,132 @@ private class PortalSyncTest {
             }
         }
     }
+
+    // ---- Value maps (Portal_Sync_Value_Map__mdt) -----------------------------
+    // A mapped field whose value must be rewritten on the way out -- a Salesforce
+    // record type or picklist landing in a HubSpot picklist, which rejects any
+    // value that is not a defined option. Custom metadata rows cannot be inserted
+    // in a test, so the loaded cache is seeded directly; the row-level fallback
+    // logic is unit tested against an in-memory row.
+
+    /** Seed the value-map cache for one (object, field): portal -> (SF value -> HS value). */
+    private static void seedValueMap(String sObjectName, String sfField, Map<String, Map<String, String>> byPortal) {
+        PortalSyncConfig.setValueMapsForTest(new Map<String, Map<String, Map<String, String>>>{
+            PortalSyncConfig.valueMapKey(sObjectName, sfField) => byPortal
+        });
+    }
+
+    /** Same translation in every enabled portal. */
+    private static Map<String, Map<String, String>> everyPortal(Map<String, String> values) {
+        Map<String, Map<String, String>> byPortal = new Map<String, Map<String, String>>();
+        for (String portal : PortalSyncConfig.allPortalValues()) byPortal.put(portal, values);
+        return byPortal;
+    }
+
+    /** An in-memory contact -- mapProperties only reads fields, so no DML is
+     *  needed, and none of these tests may cross into an async context (batch
+     *  execution resets statics, which would drop the seeded cache). */
+    private static Contact contactWithTitle(String title) {
+        return new Contact(Id = '003000000000000AAA', LastName = 'V', Email = 'v@ex.com', Title = title);
+    }
+
+    @isTest
+    static void valueMapTranslatesTheValueSentToHubSpot() {
+        // Contact.Title -> jobtitle, with a translation table attached: HubSpot
+        // must receive the mapped value, never the raw Salesforce one.
+        seedValueMap('Contact', 'Title', everyPortal(new Map<String, String>{ 'ceo' => 'chief_executive' }));
+        // 'CEO' is deliberately cased differently from the seeded key.
+        Map<String, Object> props = HubSpotService.mapProperties(contactWithTitle('CEO'), 'Contact', 'TriBU');
+        System.assertEquals('chief_executive', props.get('jobtitle'),
+            'a mapped value must be translated, and the match is case-insensitive');
+        System.assertEquals('v@ex.com', props.get('email'),
+            'fields with no value map are unaffected');
+    }
+
+    @isTest
+    static void unmappedValueOmitsThePropertyAndDeadLetters() {
+        // An untranslatable value is skipped rather than sent raw: one bad
+        // property must not fail a record whose other fields are fine, but it
+        // still has to be visible to an admin.
+        seedValueMap('Contact', 'Title', everyPortal(new Map<String, String>{ 'ceo' => 'chief_executive' }));
+        Map<String, Object> props = HubSpotService.mapProperties(contactWithTitle('Caretaker'), 'Contact', 'TriBU');
+        System.assert(!props.containsKey('jobtitle'),
+            'no translation for this value -> the property should be omitted, not sent raw');
+        System.assert(props.containsKey('email'), 'the record\'s other mapped fields should still sync');
+        PortalSyncDeadLetter.flush(); // the router flushes after its callouts; here there are none
+        List<PortalSyncDeadLetter__c> dead = [
+            SELECT Error__c FROM PortalSyncDeadLetter__c WHERE Operation__c = 'VALUE_MAP'
+        ];
+        System.assertEquals(1, dead.size(), 'the untranslated value should be dead-lettered once');
+        System.assert(dead[0].Error__c.contains('Caretaker'),
+            'the dead letter should name the value that had no row: ' + dead[0].Error__c);
+    }
+
+    @isTest
+    static void fieldWithNoValueMapIsSentVerbatim() {
+        // Regression guard: value maps are opt-in per field. A field with no rows
+        // must keep the original String.valueOf() behaviour.
+        Map<String, Object> props = HubSpotService.mapProperties(contactWithTitle('Caretaker'), 'Contact', 'TriBU');
+        System.assertEquals('Caretaker', props.get('jobtitle'),
+            'an untranslated field must still be sent verbatim');
+        PortalSyncDeadLetter.flush();
+        System.assertEquals(0, [SELECT COUNT() FROM PortalSyncDeadLetter__c]);
+    }
+
+    @isTest
+    static void recordTypeIdIsResolvedToItsDeveloperName() {
+        // The reason RecordTypeId is special-cased: the raw value is an 18-char id
+        // that differs between orgs, so it is resolved to the DeveloperName before
+        // the value map is consulted -- that is what an admin can key a row on.
+        // Every object has at least the Master record type, so this always runs.
+        Schema.RecordTypeInfo master = Schema.SObjectType.Opportunity.getRecordTypeInfosByDeveloperName().get('Master');
+        System.assertNotEquals(null, master, 'every object exposes a Master record type');
+        System.assertEquals('Master',
+            HubSpotService.normalize('Opportunity', 'RecordTypeId', master.getRecordTypeId()),
+            'a record type id must be resolved to its DeveloperName, never sent verbatim');
+    }
+
+    @isTest
+    static void normalizeLeavesEverythingElseAlone() {
+        System.assertEquals('Acme', HubSpotService.normalize('Opportunity', 'Name', 'Acme'),
+            'only RecordTypeId is special-cased');
+        System.assertEquals('1500', HubSpotService.normalize('Opportunity', 'Amount', 1500),
+            'other values keep the original String.valueOf() behaviour');
+        // An id the describe does not know (e.g. a record type deleted since the
+        // record was last saved) falls back to the raw value rather than throwing.
+        // NB 012000000000000AAA is the Master record type's real id -- it resolves.
+        System.assertEquals('012000000000999AAA',
+            HubSpotService.normalize('Opportunity', 'RecordTypeId', '012000000000999AAA'),
+            'an unresolvable record type id must not throw');
+    }
+
+    @isTest
+    static void valueMapPortalOverrideWinsOverTheSharedValue() {
+        // A HubSpot picklist option's internal value is defined per portal, so the
+        // same Salesforce value can legitimately need a different value per portal.
+        Portal_Sync_Value_Map__mdt row = new Portal_Sync_Value_Map__mdt(
+            Salesforce_Value__c   = 'Renewal_Business',
+            HubSpot_Value__c      = 'renewal',
+            HubSpot_Value_TriBU__c = 'renewal_business'
+        );
+        System.assertEquals('renewal_business', PortalSyncConfig.portalValueOf(row, 'TriBU'),
+            'the portal override wins wherever it is set');
+        System.assertEquals('renewal', PortalSyncConfig.portalValueOf(row, 'Carl Software'),
+            'a portal with no override falls back to the shared value');
+    }
+
+    @isTest
+    static void translateValueIsNullForAnythingUnconfigured() {
+        // Null is what makes mapProperties OMIT the property instead of guessing.
+        seedValueMap('Contact', 'Title', everyPortal(new Map<String, String>{ 'ceo' => 'chief_executive' }));
+        System.assert(PortalSyncConfig.hasValueMap('Contact', 'Title'));
+        System.assert(!PortalSyncConfig.hasValueMap('Contact', 'Email'),
+            'a field with no rows must not be treated as translated');
+        System.assertEquals(null, PortalSyncConfig.translateValue('Contact', 'Title', 'TriBU', 'Caretaker'),
+            'an unmapped value resolves to null');
+        System.assertEquals(null, PortalSyncConfig.translateValue('Contact', 'Title', 'TriBU', null),
+            'a null value resolves to null');
+        System.assertEquals(null, PortalSyncConfig.translateValue('Contact', 'Email', 'TriBU', 'ceo'),
+            'an untranslated field resolves to null');
+    }
 }

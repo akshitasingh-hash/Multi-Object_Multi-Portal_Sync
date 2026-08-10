@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Field_Mapping__c</fullName>
+    <description>The HubSpot Field Mapping this translation belongs to. The object and Salesforce field come from that row, so a value map is always scoped to one (object, field).</description>
+    <fieldManageability>DeveloperControlled</fieldManageability>
+    <label>Field Mapping</label>
+    <referenceTo>HubSpot_Field_Mapping__mdt</referenceTo>
+    <relationshipLabel>Value Maps</relationshipLabel>
+    <relationshipName>Value_Maps</relationshipName>
+    <required>false</required>
+    <type>MetadataRelationship</type>
+    <unique>false</unique>
+</CustomField>

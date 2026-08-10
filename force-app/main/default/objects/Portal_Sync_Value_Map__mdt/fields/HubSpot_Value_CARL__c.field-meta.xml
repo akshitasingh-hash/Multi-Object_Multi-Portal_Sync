@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>HubSpot_Value_CARL__c</fullName>
+    <description>Carl Software's value for this Salesforce value, when that portal's picklist option internal value differs from the shared HubSpot Value. Leave blank to use HubSpot Value.</description>
+    <externalId>false</externalId>
+    <fieldManageability>DeveloperControlled</fieldManageability>
+    <label>HubSpot Value (CARL)</label>
+    <length>255</length>
+    <required>false</required>
+    <type>Text</type>
+    <unique>false</unique>
+</CustomField>

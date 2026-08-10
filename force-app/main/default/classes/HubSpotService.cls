@@ -17,16 +17,71 @@ public with sharing class HubSpotService {
     // Map a record's fields to HubSpot properties FOR A SPECIFIC (object, portal):
     // only the fields whose mapping row opts into `portalValue` (Syncs_To_*) are
     // included, so different portals can receive different subsets of the record.
+    //
+    // Values are stringified verbatim UNLESS the field has Portal_Sync_Value_Map__mdt
+    // rows, in which case the Salesforce value is translated to the value that
+    // portal expects -- what makes a Salesforce picklist (or record type) legal in
+    // a HubSpot picklist, which rejects anything that is not a defined option. A
+    // translated field whose current value has no row is OMITTED and dead-lettered
+    // rather than sent raw: skipping one property leaves the rest of the record
+    // syncing, while an undefined option fails the whole record in HubSpot.
     public static Map<String, Object> mapProperties(SObject record, String sObjectName, String portalValue) {
         Map<String, Object> props = new Map<String, Object>();
         Map<String, String> fieldMap = PortalSyncConfig.fieldMapFor(sObjectName, portalValue);
         for (String sfField : fieldMap.keySet()) {
             Object v = record.get(sfField);
-            if (v != null) {
-                props.put(fieldMap.get(sfField), String.valueOf(v));
+            if (v == null) continue;
+            String value = normalize(sObjectName, sfField, v);
+            if (PortalSyncConfig.hasValueMap(sObjectName, sfField)) {
+                String translated = PortalSyncConfig.translateValue(sObjectName, sfField, portalValue, value);
+                if (translated == null) {
+                    PortalSyncDeadLetter.log(sObjectName, record.Id, portalValue, 'VALUE_MAP',
+                        'No Portal_Sync_Value_Map row for ' + sfField + ' = ' + value
+                        + ' -- property ' + fieldMap.get(sfField) + ' omitted');
+                    continue;
+                }
+                value = translated;
             }
+            props.put(fieldMap.get(sfField), value);
         }
         return props;
+    }
+
+    /**
+     * The Salesforce value as text, in the form a value map is keyed on.
+     *
+     * Only RecordTypeId is special: it holds an 18-char id that differs between
+     * sandbox and production, so it is resolved to the record type's
+     * DeveloperName -- stable, org-portable, and what an admin can actually type
+     * into a Portal_Sync_Value_Map__mdt row. Describe only, no SOQL, and the
+     * per-object lookup is cached for the transaction.
+     */
+    @TestVisible
+    private static String normalize(String sObjectName, String sfField, Object v) {
+        if ('RecordTypeId'.equalsIgnoreCase(sfField)) {
+            String devName = recordTypeDeveloperNames(sObjectName).get(String.valueOf(v));
+            if (devName != null) return devName;
+        }
+        return String.valueOf(v);
+    }
+
+    // sObject name -> (record type id -> DeveloperName).
+    private static Map<String, Map<String, String>> recordTypeNamesByObject =
+        new Map<String, Map<String, String>>();
+
+    private static Map<String, String> recordTypeDeveloperNames(String sObjectName) {
+        Map<String, String> byId = recordTypeNamesByObject.get(sObjectName);
+        if (byId == null) {
+            byId = new Map<String, String>();
+            Schema.SObjectType sot = Schema.getGlobalDescribe().get(sObjectName);
+            if (sot != null) {
+                for (Schema.RecordTypeInfo info : sot.getDescribe().getRecordTypeInfosById().values()) {
+                    byId.put(String.valueOf(info.getRecordTypeId()), info.getDeveloperName());
+                }
+            }
+            recordTypeNamesByObject.put(sObjectName, byId);
+        }
+        return byId;
     }
 
     // ---- Bulk (batch) operations -------------------------------------------

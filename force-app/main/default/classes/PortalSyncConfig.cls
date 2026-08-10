@@ -44,6 +44,18 @@ public with sharing class PortalSyncConfig {
         'Berger-Levrault Spain' => 'Association_Type_Id_Spain__c'
     };
 
+    // Portal value -> the Portal_Sync_Value_Map__mdt Text field holding THAT
+    // portal's translated value. Same shape as the association-type map above and
+    // for the same reason: a HubSpot picklist option's INTERNAL VALUE is defined
+    // per portal, so "Renewal Business" may be renewal_business in TriBU and
+    // renewal in CARL. A portal whose override is blank falls back to the shared
+    // HubSpot_Value__c -- correct whenever the portals agree, which is the norm.
+    private static final Map<String, String> PORTAL_TO_VALUE_FIELD = new Map<String, String>{
+        'Carl Software'  => 'HubSpot_Value_CARL__c',
+        'TriBU' => 'HubSpot_Value_TriBU__c',
+        'Berger-Levrault Spain' => 'HubSpot_Value_Spain__c'
+    };
+
     // Outbox status values (per-object status field and tombstone Status__c).
     public static final String STATUS_PENDING    = 'Pending';
     public static final String STATUS_PROCESSING = 'Processing';
@@ -188,6 +200,118 @@ public with sharing class PortalSyncConfig {
 
     public static List<String> allPortalValues() {
         return new List<String>(PORTAL_TO_NAMED_CREDENTIAL.keySet());
+    }
+
+    // ---- Value maps (Portal_Sync_Value_Map__mdt) -----------------------------
+    // Field mappings decide WHICH value moves; value maps decide WHAT it looks
+    // like on arrival. Needed wherever the two systems disagree on representation
+    // -- above all a Salesforce id or picklist landing in a HubSpot picklist,
+    // which rejects any value that is not a defined option.
+    //
+    // Loaded from its OWN lazy cache, deliberately separate from fieldMaps():
+    // triggers call mappedSfFields() on every save and must not pay for a query
+    // only the callout path needs.
+    //
+    // Key is object + SF field (both lowercased) -> portal -> (SF value lowercased
+    // -> HubSpot value). Lowercasing both sides of the lookup makes the match
+    // case-insensitive, so a value map keeps working if a picklist API value is
+    // recased in Salesforce.
+    private static Map<String, Map<String, Map<String, String>>> valueMapsByField;
+
+    @TestVisible
+    private static String valueMapKey(String sObjectName, String sfField) {
+        return (sObjectName + '.' + sfField).toLowerCase();
+    }
+
+    private static Map<String, Map<String, Map<String, String>>> valueMaps() {
+        if (valueMapsByField == null) {
+            valueMapsByField = new Map<String, Map<String, Map<String, String>>>();
+            // The owning object is reached through the mapping row, but resolved
+            // from getAll() rather than a second relationship hop in the query --
+            // one level of traversal is all this needs, and getAll() costs no SOQL.
+            Map<String, ObjectConfig> configById = new Map<String, ObjectConfig>();
+            for (Portal_Sync_Object__mdt o : Portal_Sync_Object__mdt.getAll().values()) {
+                ObjectConfig cfg = objectConfig(o.SObject_API_Name__c);
+                if (cfg != null) configById.put(String.valueOf(o.Id), cfg);
+            }
+            for (Portal_Sync_Value_Map__mdt v : [
+                    SELECT Salesforce_Value__c, HubSpot_Value__c, Active__c,
+                           HubSpot_Value_TriBU__c, HubSpot_Value_CARL__c, HubSpot_Value_Spain__c,
+                           Field_Mapping__r.SF_Field__c, Field_Mapping__r.Active__c,
+                           Field_Mapping__r.Portal_Sync_Object__c
+                    FROM Portal_Sync_Value_Map__mdt
+                    WHERE Active__c = true
+                      AND Field_Mapping__r.Active__c = true]) {
+                ObjectConfig owner = configById.get(String.valueOf(v.Field_Mapping__r.Portal_Sync_Object__c));
+                if (owner == null || !owner.active
+                        || String.isBlank(v.Field_Mapping__r.SF_Field__c)
+                        || String.isBlank(v.Salesforce_Value__c)) {
+                    continue;
+                }
+                String obj = owner.sObjectName;
+                String key = valueMapKey(obj, v.Field_Mapping__r.SF_Field__c);
+                if (!valueMapsByField.containsKey(key)) {
+                    Map<String, Map<String, String>> byPortal = new Map<String, Map<String, String>>();
+                    for (String portal : PORTAL_TO_VALUE_FIELD.keySet()) {
+                        byPortal.put(portal, new Map<String, String>());
+                    }
+                    valueMapsByField.put(key, byPortal);
+                }
+                String sfValue = v.Salesforce_Value__c.trim().toLowerCase();
+                for (String portal : PORTAL_TO_VALUE_FIELD.keySet()) {
+                    String hsValue = portalValueOf(v, portal);
+                    if (String.isNotBlank(hsValue)) {
+                        valueMapsByField.get(key).get(portal).put(sfValue, hsValue);
+                    }
+                }
+            }
+        }
+        return valueMapsByField;
+    }
+
+    /**
+     * One row's value for ONE portal: that portal's override if it carries one,
+     * else the shared HubSpot_Value__c. Only a NON-BLANK override wins -- a blank
+     * one has to fall through to the shared value rather than shadow it, the same
+     * rule the association type ids follow.
+     */
+    @TestVisible
+    private static String portalValueOf(Portal_Sync_Value_Map__mdt row, String portal) {
+        String overrideField = PORTAL_TO_VALUE_FIELD.get(portal);
+        if (overrideField != null) {
+            Object own = row.get(overrideField);
+            if (own != null && String.isNotBlank((String) own)) return (String) own;
+        }
+        return row.HubSpot_Value__c;
+    }
+
+    /** True when ANY translation is configured for this (object, field) -- i.e.
+     *  the field's raw Salesforce value must never be sent as-is. Checked before
+     *  translateValue so an untranslated value can be reported rather than
+     *  silently shipped to a HubSpot picklist that would reject it. */
+    public static Boolean hasValueMap(String sObjectName, String sfField) {
+        return valueMaps().containsKey(valueMapKey(sObjectName, sfField));
+    }
+
+    /**
+     * The HubSpot value to send for one Salesforce value in ONE portal, or null
+     * when this (object, field, portal) has no row for it. Null is meaningful:
+     * the caller must omit the property rather than guess, because an undefined
+     * picklist option fails the record in HubSpot.
+     */
+    public static String translateValue(String sObjectName, String sfField, String portal, String rawValue) {
+        if (rawValue == null) return null;
+        Map<String, Map<String, String>> byPortal = valueMaps().get(valueMapKey(sObjectName, sfField));
+        if (byPortal == null) return null;
+        Map<String, String> values = byPortal.get(portal);
+        return (values != null) ? values.get(rawValue.trim().toLowerCase()) : null;
+    }
+
+    /** Custom Metadata cannot be inserted in a test, so tests seed the cache
+     *  directly: key -> portal -> (SF value lowercased -> HubSpot value). */
+    @TestVisible
+    private static void setValueMapsForTest(Map<String, Map<String, Map<String, String>>> maps) {
+        valueMapsByField = maps;
     }
 
     // ---- Associations (Portal_Sync_Association__mdt) -------------------------
