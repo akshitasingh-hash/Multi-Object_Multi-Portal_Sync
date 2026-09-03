@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Status__c</fullName>
+    <description
+  >Pending or Failed. Plain Text rather than a restricted picklist, so the drain batch is never blocked by a value the schema does not know. A row is DELETED on success; a row that exhausts its retries is KEPT and dead-lettered, because deleting it would permanently reopen the duplicate-creation window.</description>
+    <externalId>false</externalId>
+    <label>Status</label>
+    <length>40</length>
+    <required>false</required>
+    <trackTrending>false</trackTrending>
+    <type>Text</type>
+    <unique>false</unique>
+</CustomField>

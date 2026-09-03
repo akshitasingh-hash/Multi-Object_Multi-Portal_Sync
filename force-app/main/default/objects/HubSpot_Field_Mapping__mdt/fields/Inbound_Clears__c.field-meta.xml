@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Inbound_Clears__c</fullName>
+    <defaultValue>true</defaultValue>
+    <description
+  >Whether an empty HubSpot value is allowed to CLEAR this Salesforce field on the inbound leg. Only consulted for HS_to_SF and Bidirectional fields, and only for a property that came back PRESENT-but-empty -- a property absent from the response is always treated as unknown and skipped. A clear on a non-nillable field is refused regardless of this flag.</description>
+    <fieldManageability>DeveloperControlled</fieldManageability>
+    <label>Inbound Clears</label>
+    <required>false</required>
+    <type>Checkbox</type>
+</CustomField>

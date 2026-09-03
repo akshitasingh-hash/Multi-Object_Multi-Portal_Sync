@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Inbound_Preferred__c</fullName>
+    <defaultValue>false</defaultValue>
+    <description
+  >Tie-break for the REVERSE (HubSpot to Salesforce) translation. Forward translation is many-to-one, so two Salesforce values can map onto one HubSpot value; reversing that is ambiguous and is refused rather than guessed. Check this on exactly ONE of the colliding rows to declare which Salesforce value an incoming HubSpot value becomes. Zero or two-plus checked leaves the ambiguity standing.</description>
+    <fieldManageability>DeveloperControlled</fieldManageability>
+    <label>Inbound Preferred</label>
+    <type>Checkbox</type>
+</CustomField>

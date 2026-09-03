@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Inbound_Skew_Seconds__c</fullName>
+    <description
+  >Tolerance band for the Bidirectional newest-modified-wins comparison: HubSpot must be newer than the Salesforce provenance stamp by MORE than this to win. Blank defaults to 120. Needed because the two clocks are independent AND because an outbound push legitimately lands in HubSpot minutes after the Salesforce edit that caused it -- without the band, every Salesforce-originated change would look like a HubSpot win on the next poll.</description>
+    <externalId>false</externalId>
+    <fieldManageability>SubscriberControlled</fieldManageability>
+    <label>Inbound Skew Seconds</label>
+    <precision>5</precision>
+    <required>false</required>
+    <scale>0</scale>
+    <type>Number</type>
+    <unique>false</unique>
+</CustomField>

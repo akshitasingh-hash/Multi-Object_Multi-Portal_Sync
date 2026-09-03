@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Paused__c</fullName>
+    <defaultValue>false</defaultValue>
+    <description
+  >Per-(object, portal) kill switch. Checking it stops polling that one combination immediately, with no deploy and without disabling inbound for the whole object. The watermark is left untouched, so unpausing resumes exactly where it stopped.</description>
+    <externalId>false</externalId>
+    <label>Paused</label>
+    <trackTrending>false</trackTrending>
+    <type>Checkbox</type>
+</CustomField>

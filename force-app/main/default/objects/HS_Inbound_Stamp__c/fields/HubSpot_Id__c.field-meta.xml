@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>HubSpot_Id__c</fullName>
+    <description
+  >The HubSpot object id to stamp. The write-back uses batch/update keyed on THIS id, never batch/upsert keyed on the sf-id property -- an upsert against a record whose sf-id is still blank would create a second HubSpot record. HubSpot ids are portal-scoped, which is why Portal__c is part of every row.</description>
+    <externalId>false</externalId>
+    <label>HubSpot Id</label>
+    <length>40</length>
+    <required>false</required>
+    <trackTrending>false</trackTrending>
+    <type>Text</type>
+    <unique>false</unique>
+</CustomField>

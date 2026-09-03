@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Last_Status__c</fullName>
+    <description
+  >Outcome of the last run: OK, Failed, or Deferred (hit Inbound_Max_Pages__c with more to fetch). Plain Text, so new outcomes need no metadata change.</description>
+    <externalId>false</externalId>
+    <label>Last Status</label>
+    <length>40</length>
+    <required>false</required>
+    <trackTrending>false</trackTrending>
+    <type>Text</type>
+    <unique>false</unique>
+</CustomField>

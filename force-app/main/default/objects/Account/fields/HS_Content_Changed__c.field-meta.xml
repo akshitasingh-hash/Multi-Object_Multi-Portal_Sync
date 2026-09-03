@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>HS_Content_Changed__c</fullName>
+    <description
+  >When a MAPPED field on this record last actually changed in Salesforce. Stamped by the before-trigger, never by the sync engine's own status DML -- which is why LastModifiedDate cannot be used for this. It is the Salesforce side of the inbound newest-modified-wins comparison for Bidirectional fields.</description>
+    <label>HS Content Changed</label>
+    <required>false</required>
+    <trackFeedHistory>false</trackFeedHistory>
+    <type>DateTime</type>
+</CustomField>

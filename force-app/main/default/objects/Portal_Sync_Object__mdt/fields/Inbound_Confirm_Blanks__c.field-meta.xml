@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Inbound_Confirm_Blanks__c</fullName>
+    <defaultValue>true</defaultValue>
+    <description
+  >Re-read a record via batch/read before applying any CLEAR. HubSpot's search endpoint may OMIT an empty property rather than return it as null, which makes "cleared in HubSpot" and "unknown" indistinguishable from search alone; batch/read returns requested properties explicitly and is authoritative. Costs one extra callout per 100 records per portal, and only when a requested property actually came back absent. Turn off only once the portals' search behaviour has been verified empirically.</description>
+    <fieldManageability>SubscriberControlled</fieldManageability>
+    <label>Inbound Confirm Blanks</label>
+    <type>Checkbox</type>
+</CustomField>

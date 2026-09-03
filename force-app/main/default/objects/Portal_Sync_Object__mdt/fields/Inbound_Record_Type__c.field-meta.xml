@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Inbound_Record_Type__c</fullName>
+    <description
+  >RecordType DeveloperName assigned to inbound-created records. Blank uses the running user's default record type. A DeveloperName (not an id) so the row is portable between sandbox and production.</description>
+    <externalId>false</externalId>
+    <fieldManageability>SubscriberControlled</fieldManageability>
+    <label>Inbound Record Type</label>
+    <length>255</length>
+    <required>false</required>
+    <type>Text</type>
+    <unique>false</unique>
+</CustomField>

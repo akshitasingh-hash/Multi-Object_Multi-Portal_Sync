@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Records_Applied__c</fullName>
+    <description
+  >Records the last run actually wrote to Salesforce (created or updated). Zero is normal and expected when nothing changed in HubSpot.</description>
+    <externalId>false</externalId>
+    <label>Records Applied</label>
+    <precision>9</precision>
+    <required>false</required>
+    <scale>0</scale>
+    <trackTrending>false</trackTrending>
+    <type>Number</type>
+    <unique>false</unique>
+</CustomField>

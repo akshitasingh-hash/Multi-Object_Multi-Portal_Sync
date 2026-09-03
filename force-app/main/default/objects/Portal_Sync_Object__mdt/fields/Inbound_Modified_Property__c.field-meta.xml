@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Inbound_Modified_Property__c</fullName>
+    <description
+  >HubSpot property the inbound poll filters and sorts on, and reads as the HubSpot side of the conflict comparison. Blank defaults to hs_lastmodifieddate. Configurable because contacts also expose a legacy lastmodifieddate and a custom object may differ -- a wrong property name makes HubSpot reject the search with a 400.</description>
+    <externalId>false</externalId>
+    <fieldManageability>SubscriberControlled</fieldManageability>
+    <label>Inbound Modified Property</label>
+    <length>255</length>
+    <required>false</required>
+    <type>Text</type>
+    <unique>false</unique>
+</CustomField>

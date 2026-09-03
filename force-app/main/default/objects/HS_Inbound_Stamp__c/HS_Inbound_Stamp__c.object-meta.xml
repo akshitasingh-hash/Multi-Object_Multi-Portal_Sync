@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<CustomObject xmlns="http://soap.sforce.com/2006/04/metadata">
+    <allowInChatterGroups>false</allowInChatterGroups>
+    <compactLayoutAssignment>SYSTEM</compactLayoutAssignment>
+    <deploymentStatus>Deployed</deploymentStatus>
+    <description
+  >Durable queue for writing a newly created Salesforce id BACK to the HubSpot record it came from. The id only exists after the insert, and a callout after uncommitted DML throws, so the write-back must happen in a later transaction. It is staged here rather than in a Queueable because losing the (HubSpot id -&gt; Salesforce id) pairing would leave a HubSpot record with a blank sf-id property that the next poll imports AGAIN as a duplicate Salesforce record -- the worst failure mode in the inbound design. Same role, and same drain-and-delete shape, as HS_Sync_Tombstone__c.</description>
+    <enableActivities>false</enableActivities>
+    <enableBulkApi>true</enableBulkApi>
+    <enableFeeds>false</enableFeeds>
+    <enableHistory>false</enableHistory>
+    <enableLicensing>false</enableLicensing>
+    <enableReports>true</enableReports>
+    <enableSearch>false</enableSearch>
+    <enableSharing>true</enableSharing>
+    <enableStreamingApi>true</enableStreamingApi>
+    <externalSharingModel>Private</externalSharingModel>
+    <label>HS Inbound Stamp</label>
+    <nameField>
+        <label>HS Inbound Stamp Name</label>
+        <type>Text</type>
+    </nameField>
+    <pluralLabel>HS Inbound Stamps</pluralLabel>
+    <searchLayouts />
+    <sharingModel>ReadWrite</sharingModel>
+    <visibility>Public</visibility>
+</CustomObject>

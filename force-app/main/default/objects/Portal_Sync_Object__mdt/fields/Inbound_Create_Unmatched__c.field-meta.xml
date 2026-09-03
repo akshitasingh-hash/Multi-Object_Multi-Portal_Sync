@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Inbound_Create_Unmatched__c</fullName>
+    <defaultValue>false</defaultValue>
+    <description
+  >Whether a HubSpot record with a BLANK Salesforce-id property may create a new Salesforce record. Default false (update-only). A HubSpot record whose sf-id property IS populated but whose Salesforce record no longer exists is never created regardless of this flag -- that is a deleted record, and recreating it would break delete-termination.</description>
+    <fieldManageability>SubscriberControlled</fieldManageability>
+    <label>Inbound Create Unmatched</label>
+    <type>Checkbox</type>
+</CustomField>

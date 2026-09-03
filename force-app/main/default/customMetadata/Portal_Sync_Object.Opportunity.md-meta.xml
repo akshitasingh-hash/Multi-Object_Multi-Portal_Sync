@@ -1,5 +1,9 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<CustomMetadata xmlns="http://soap.sforce.com/2006/04/metadata" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+<?xml version="1.0" encoding="UTF-8" ?>
+<CustomMetadata
+  xmlns="http://soap.sforce.com/2006/04/metadata"
+  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+  xmlns:xsd="http://www.w3.org/2001/XMLSchema"
+>
     <label>Opportunity</label>
     <protected>false</protected>
     <values>
@@ -49,5 +53,45 @@
     <values>
         <field>Sync_Owner__c</field>
         <value xsi:type="xsd:boolean">true</value>
+    </values>
+    <values>
+        <field>Content_Changed_Field__c</field>
+        <value xsi:type="xsd:string">HS_Content_Changed__c</value>
+    </values>
+    <values>
+        <field>Inbound_Batch_Class__c</field>
+        <value xsi:type="xsd:string">OpportunityInboundBatch</value>
+    </values>
+    <values>
+        <field>Inbound_Active__c</field>
+        <value xsi:type="xsd:boolean">false</value>
+    </values>
+    <values>
+        <field>Inbound_Create_Unmatched__c</field>
+        <value xsi:type="xsd:boolean">false</value>
+    </values>
+    <values>
+        <field>Inbound_Confirm_Blanks__c</field>
+        <value xsi:type="xsd:boolean">true</value>
+    </values>
+    <values>
+        <field>Inbound_Modified_Property__c</field>
+        <value xsi:type="xsd:string">hs_lastmodifieddate</value>
+    </values>
+    <values>
+        <field>Inbound_Overlap_Seconds__c</field>
+        <value xsi:type="xsd:double">300.0</value>
+    </values>
+    <values>
+        <field>Inbound_Skew_Seconds__c</field>
+        <value xsi:type="xsd:double">120.0</value>
+    </values>
+    <values>
+        <field>Inbound_Max_Pages__c</field>
+        <value xsi:type="xsd:double">20.0</value>
+    </values>
+    <values>
+        <field>Inbound_Initial_Lookback_Days__c</field>
+        <value xsi:type="xsd:double">1.0</value>
     </values>
 </CustomMetadata>

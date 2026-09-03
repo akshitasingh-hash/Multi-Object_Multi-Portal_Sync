@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Records_Seen__c</fullName>
+    <description
+  >HubSpot records returned by the last run. Compare against Records_Applied__c: a large Seen with a near-zero Applied is the healthy steady state (the engine is recognising its own outbound echo and doing nothing).</description>
+    <externalId>false</externalId>
+    <label>Records Seen</label>
+    <precision>9</precision>
+    <required>false</required>
+    <scale>0</scale>
+    <trackTrending>false</trackTrending>
+    <type>Number</type>
+    <unique>false</unique>
+</CustomField>

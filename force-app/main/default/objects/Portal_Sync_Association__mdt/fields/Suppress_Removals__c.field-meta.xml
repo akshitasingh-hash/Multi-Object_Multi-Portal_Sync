@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Suppress_Removals__c</fullName>
+    <defaultValue>false</defaultValue>
+    <description
+  >Make this association CREATE-ONLY: missing links are still created, but a link HubSpot has and Salesforce does not relate is never archived. Use it when Salesforce does not hold the whole truth about the relationship -- above all when inbound creates records from HubSpot, because a record whose lookups have not been resolved yet presents an empty desired set that is indistinguishable from "no links", and acting on it strips the record's real associations in HubSpot. Leave off wherever Salesforce is genuinely authoritative for the relationship.</description>
+    <fieldManageability>SubscriberControlled</fieldManageability>
+    <label>Suppress Removals</label>
+    <type>Checkbox</type>
+</CustomField>

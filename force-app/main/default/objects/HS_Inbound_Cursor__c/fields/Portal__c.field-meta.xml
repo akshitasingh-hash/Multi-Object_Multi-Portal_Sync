@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Portal__c</fullName>
+    <description
+  >HubSpot portal this cursor tracks. Deliberately plain Text, not a restricted picklist: PortalSyncDeadLetter__c.Portal__c is restricted and that constraint has already shaped the engine's code, so cursor rows should not inherit it.</description>
+    <externalId>false</externalId>
+    <label>Portal</label>
+    <length>80</length>
+    <required>false</required>
+    <trackTrending>false</trackTrending>
+    <type>Text</type>
+    <unique>false</unique>
+</CustomField>

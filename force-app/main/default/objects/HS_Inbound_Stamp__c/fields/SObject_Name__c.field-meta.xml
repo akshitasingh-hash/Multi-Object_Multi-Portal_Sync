@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>SObject_Name__c</fullName>
+    <description
+  >Salesforce object of the created record, so the drain batch can resolve its HubSpot path and sf-id property from config.</description>
+    <externalId>false</externalId>
+    <label>SObject Name</label>
+    <length>80</length>
+    <required>false</required>
+    <trackTrending>false</trackTrending>
+    <type>Text</type>
+    <unique>false</unique>
+</CustomField>

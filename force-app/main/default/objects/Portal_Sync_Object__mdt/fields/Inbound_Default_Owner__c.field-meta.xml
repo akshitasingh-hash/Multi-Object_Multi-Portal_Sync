@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Inbound_Default_Owner__c</fullName>
+    <description
+  >Username that owns inbound-created records. Blank leaves OwnerId unset, so Salesforce assigns the running (scheduling) user. Note inbound does not reverse-resolve hubspot_owner_id to a Salesforce User -- ownership of HubSpot-originated records is a deliberate config choice, not a synced value.</description>
+    <externalId>false</externalId>
+    <fieldManageability>SubscriberControlled</fieldManageability>
+    <label>Inbound Default Owner</label>
+    <length>255</length>
+    <required>false</required>
+    <type>Text</type>
+    <unique>false</unique>
+</CustomField>

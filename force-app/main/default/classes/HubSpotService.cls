@@ -351,6 +351,107 @@ public with sharing class HubSpotService {
     return hsIdBySfId;
   }
 
+  /**
+   * Read arbitrary properties for records identified by their SALESFORCE ids:
+   * sfId -> properties. Ids not present in the portal are simply absent from the
+   * result (absent = not there yet, which is not an error).
+   *
+   * This is what makes the conflict rule symmetric. Without it the newest-wins
+   * comparison would exist only on the inbound leg, and a HubSpot edit made
+   * between a Salesforce edit and the next outbound push would be overwritten
+   * before inbound ever saw it -- along with the timestamp that proved HubSpot
+   * was newer. Only called for (object, portal) pairs that actually have a
+   * Bidirectional field, so the cost is zero until someone opts in.
+   */
+  public static Map<String, Map<String, Object>> batchReadBySfId(
+    PortalSyncConfig.ObjectConfig cfg,
+    String portalValue,
+    List<String> sfIds,
+    List<String> properties,
+    Map<String, String> failed
+  ) {
+    Map<String, Map<String, Object>> propsBySfId = new Map<String, Map<String, Object>>();
+    String idProperty = cfg.sfIdProperty;
+    List<String> wanted = new List<String>(properties);
+    if (!wanted.contains(idProperty)) {
+      wanted.add(idProperty);
+    }
+    for (Integer i = 0; i < sfIds.size(); i += BATCH_LIMIT) {
+      List<String> chunk = new List<String>();
+      List<Object> inputs = new List<Object>();
+      for (Integer j = i; j < Math.min(i + BATCH_LIMIT, sfIds.size()); j++) {
+        chunk.add(sfIds[j]);
+        inputs.add(new Map<String, Object>{ 'id' => sfIds[j] });
+      }
+      Map<String, Object> body = new Map<String, Object>{
+        'idProperty' => idProperty,
+        'properties' => wanted,
+        'inputs' => inputs
+      };
+      HttpResponse res;
+      try {
+        res = send(
+          portalValue,
+          'POST',
+          objectPath(cfg) + '/batch/read',
+          JSON.serialize(body)
+        );
+      } catch (Exception e) {
+        for (String sfId : chunk) {
+          failed.put(sfId, 'COMPARE callout error: ' + e.getMessage());
+        }
+        continue;
+      }
+      if (!isOk(res)) {
+        String detail = 'COMPARE ' + errorDetail(res);
+        for (String sfId : chunk) {
+          failed.put(sfId, detail);
+        }
+        continue;
+      }
+      for (Object o : resultsOf(res.getBody())) {
+        Map<String, Object> r = (Map<String, Object>) o;
+        Map<String, Object> props = (Map<String, Object>) r.get('properties');
+        String sfId = (props != null) ? (String) props.get(idProperty) : null;
+        if (sfId != null) {
+          propsBySfId.put(sfId, props);
+        }
+      }
+    }
+    return propsBySfId;
+  }
+
+  /**
+   * A HubSpot timestamp -> Datetime. Accepts epoch milliseconds or ISO-8601
+   * with a Z, which are the two forms the CRM v3 API uses. Null when unparseable.
+   *
+   * Datetime.valueOf() is deliberately NOT used: it expects
+   * 'yyyy-MM-dd HH:mm:ss' and interprets it in the RUNNING USER's time zone. A
+   * batch runs as whoever scheduled it, so that would shift every timestamp by
+   * that user's UTC offset -- silently corrupting both the conflict comparison
+   * and the inbound watermark, by whole hours.
+   */
+  public static Datetime parseHubSpotDatetime(Object value) {
+    if (value == null) {
+      return null;
+    }
+    if (value instanceof Datetime) {
+      return (Datetime) value;
+    }
+    String v = String.valueOf(value).trim();
+    if (String.isBlank(v)) {
+      return null;
+    }
+    try {
+      if (v.isNumeric()) {
+        return Datetime.newInstance(Long.valueOf(v));
+      }
+      return (Datetime) JSON.deserialize('"' + v + '"', Datetime.class);
+    } catch (Exception e) {
+      return null;
+    }
+  }
+
   // ---- Owners (CRM v3) ----------------------------------------------------
   // HubSpot owners are global to a portal (not per-object), so this is one GET
   // per portal -- not per record -- regardless of how many distinct emails
@@ -398,13 +499,227 @@ public with sharing class HubSpotService {
             byEmail.put(email.toLowerCase(), String.valueOf(id));
         }
       }
-      Map<String, Object> paging = (Map<String, Object>) parsed.get('paging');
-      Map<String, Object> next = (paging != null)
-        ? (Map<String, Object>) paging.get('next')
-        : null;
-      after = (next != null) ? (String) next.get('after') : null;
+      after = nextAfter(parsed);
     } while (after != null);
     return byEmail;
+  }
+
+  // ---- Inbound: search + write-back (CRM v3) ------------------------------
+  // The inbound direction reads changes OUT of HubSpot, so unlike every method
+  // above it is driven by a cursor rather than by a list of Salesforce records.
+  // Cost scales with the number of records CHANGED in HubSpot (one request per
+  // 100), not with the number of portals -- worth knowing, because it is the one
+  // place the engine's "callouts scale with portals, not records" property does
+  // not hold.
+
+  /** One page of search results, plus the cursor for the next page. */
+  public class SearchPage {
+    /** Raw result maps, each with 'id' and 'properties'. Deliberately NOT
+     *  flattened: the caller must be able to tell a property that came back
+     *  PRESENT-but-empty (a deliberate clear) from one ABSENT from the response
+     *  (unknown), and any flattening would destroy that distinction. */
+    public List<Map<String, Object>> results = new List<Map<String, Object>>();
+    /** Cursor for the next page; null means there are no more. */
+    public String after;
+  }
+
+  /**
+   * One page of records modified at or after `since`, sorted OLDEST FIRST.
+   *
+   * Ascending order is load-bearing, not cosmetic: it lets the caller advance
+   * its watermark to the last record it actually processed, so a failure part
+   * way through a page resumes from the right place instead of skipping the
+   * remainder. It also means the cursor is never needed across runs, which
+   * matters because HubSpot's search paging refuses to go beyond 10,000 results.
+   *
+   * The filter is >= (not >) because the caller deliberately rewinds a few
+   * minutes to absorb search-index lag; re-seeing a record is free, since every
+   * inbound write is diff-gated.
+   *
+   * On any failure: one entry in `failed` keyed by portal, and an empty page
+   * with a null cursor -- so the caller stops paging and leaves its watermark
+   * untouched rather than skipping records it never saw.
+   */
+  public static SearchPage searchModifiedSince(
+    PortalSyncConfig.ObjectConfig cfg,
+    String portalValue,
+    String modifiedProperty,
+    Datetime since,
+    List<String> properties,
+    Integer pageSize,
+    String after,
+    Map<String, String> failed
+  ) {
+    SearchPage page = new SearchPage();
+
+    Map<String, Object> filter = new Map<String, Object>{
+      'propertyName' => modifiedProperty,
+      'operator' => 'GTE',
+      // HubSpot wants epoch MILLISECONDS as a string here. Datetime.getTime()
+      // is already UTC-based, so no time zone is involved.
+      'value' => String.valueOf(since.getTime())
+    };
+    Map<String, Object> body = new Map<String, Object>{
+      'filterGroups' => new List<Object>{
+        new Map<String, Object>{ 'filters' => new List<Object>{ filter } }
+      },
+      'properties' => properties,
+      'sorts' => new List<Object>{
+        new Map<String, Object>{
+          'propertyName' => modifiedProperty,
+          'direction' => 'ASCENDING'
+        }
+      },
+      'limit' => pageSize
+    };
+    if (String.isNotBlank(after)) {
+      body.put('after', after);
+    }
+
+    HttpResponse res;
+    try {
+      res = send(
+        portalValue,
+        'POST',
+        objectPath(cfg) + '/search',
+        JSON.serialize(body)
+      );
+    } catch (Exception e) {
+      failed.put(portalValue, 'SEARCH callout error: ' + e.getMessage());
+      return page;
+    }
+    if (!isOk(res)) {
+      failed.put(portalValue, 'SEARCH ' + errorDetail(res));
+      return page;
+    }
+    for (Object o : resultsOf(res.getBody())) {
+      page.results.add((Map<String, Object>) o);
+    }
+    page.after = nextAfter(
+      (Map<String, Object>) JSON.deserializeUntyped(res.getBody())
+    );
+    return page;
+  }
+
+  /**
+   * Write the Salesforce id onto records that ALREADY exist in HubSpot, keyed on
+   * the HubSpot object id. Returns hsId -> failure detail; empty means success.
+   *
+   * This must never be batchUpsertBySfId. An upsert keyed on idProperty against
+   * a record whose sf-id property is still blank does not match it -- it CREATES
+   * A SECOND HubSpot record, leaving the original orphaned and re-importable
+   * forever. Keying on the HubSpot id is the whole point of this method.
+   */
+  public static Map<String, String> batchStampSfId(
+    PortalSyncConfig.ObjectConfig cfg,
+    String portalValue,
+    Map<String, String> sfIdByHsId
+  ) {
+    Map<String, String> failed = new Map<String, String>();
+    List<String> hsIds = new List<String>(sfIdByHsId.keySet());
+    for (Integer i = 0; i < hsIds.size(); i += BATCH_LIMIT) {
+      List<String> chunk = new List<String>();
+      List<Object> inputs = new List<Object>();
+      for (Integer j = i; j < Math.min(i + BATCH_LIMIT, hsIds.size()); j++) {
+        String hsId = hsIds[j];
+        chunk.add(hsId);
+        inputs.add(
+          new Map<String, Object>{
+            'id' => hsId,
+            'properties' => new Map<String, Object>{
+              cfg.sfIdProperty => sfIdByHsId.get(hsId)
+            }
+          }
+        );
+      }
+      HttpResponse res;
+      try {
+        res = send(
+          portalValue,
+          'POST',
+          objectPath(cfg) + '/batch/update',
+          JSON.serialize(new Map<String, Object>{ 'inputs' => inputs })
+        );
+      } catch (Exception e) {
+        for (String hsId : chunk) {
+          failed.put(hsId, 'STAMP callout error: ' + e.getMessage());
+        }
+        continue; // a chunk failure must not abort the run
+      }
+      Integer code = res.getStatusCode();
+      if (code == 200) {
+        continue; // whole chunk applied
+      }
+      // 207 is multi-status: some inputs applied, some did not. Anything else
+      // means nothing applied, so the whole chunk is reported failed.
+      Set<String> ok = (code == 207)
+        ? idsFromResults(res.getBody())
+        : new Set<String>();
+      String detail = 'STAMP ' + errorDetail(res);
+      for (String hsId : chunk) {
+        if (!ok.contains(hsId)) {
+          failed.put(hsId, detail);
+        }
+      }
+    }
+    return failed;
+  }
+
+  /**
+   * Authoritative property read for a set of HubSpot ids: hsId -> properties.
+   *
+   * Exists because HubSpot's SEARCH endpoint may OMIT a property that has no
+   * value rather than return it as null, which makes "cleared in HubSpot" and
+   * "not told" indistinguishable from search alone. batch/read returns every
+   * requested property explicitly, so it can settle that question before
+   * anything is blanked in Salesforce. Read by HubSpot id, so no idProperty is
+   * sent.
+   */
+  public static Map<String, Map<String, Object>> batchReadProperties(
+    PortalSyncConfig.ObjectConfig cfg,
+    String portalValue,
+    List<String> hsIds,
+    List<String> properties,
+    Map<String, String> failed
+  ) {
+    Map<String, Map<String, Object>> propsByHsId = new Map<String, Map<String, Object>>();
+    for (Integer i = 0; i < hsIds.size(); i += BATCH_LIMIT) {
+      List<String> chunk = new List<String>();
+      List<Object> inputs = new List<Object>();
+      for (Integer j = i; j < Math.min(i + BATCH_LIMIT, hsIds.size()); j++) {
+        chunk.add(hsIds[j]);
+        inputs.add(new Map<String, Object>{ 'id' => hsIds[j] });
+      }
+      Map<String, Object> body = new Map<String, Object>{
+        'properties' => properties,
+        'inputs' => inputs
+      };
+      HttpResponse res;
+      try {
+        res = send(
+          portalValue,
+          'POST',
+          objectPath(cfg) + '/batch/read',
+          JSON.serialize(body)
+        );
+      } catch (Exception e) {
+        failed.put(portalValue, 'CONFIRM callout error: ' + e.getMessage());
+        continue;
+      }
+      if (!isOk(res)) {
+        failed.put(portalValue, 'CONFIRM ' + errorDetail(res));
+        continue;
+      }
+      for (Object o : resultsOf(res.getBody())) {
+        Map<String, Object> r = (Map<String, Object>) o;
+        String hsId = String.valueOf(r.get('id'));
+        Map<String, Object> props = (Map<String, Object>) r.get('properties');
+        if (hsId != null && props != null) {
+          propsByHsId.put(hsId, props);
+        }
+      }
+    }
+    return propsByHsId;
   }
 
   // ---- Associations (CRM v4) ---------------------------------------------
@@ -652,6 +967,30 @@ public with sharing class HubSpotService {
       }
     }
     return out;
+  }
+
+  /** HubSpot object ids present in a batch response's results[], read under
+   *  'id'. The counterpart to sfIdsFromResults for calls keyed on the HubSpot
+   *  id rather than on the sf-id property. */
+  private static Set<String> idsFromResults(String responseBody) {
+    Set<String> out = new Set<String>();
+    for (Object o : resultsOf(responseBody)) {
+      Object id = ((Map<String, Object>) o).get('id');
+      if (id != null) {
+        out.add(String.valueOf(id));
+      }
+    }
+    return out;
+  }
+
+  /** The standard v3 pagination cursor (paging.next.after), or null at the end
+   *  of a listing. Shared by the owners listing and the inbound search. */
+  private static String nextAfter(Map<String, Object> parsed) {
+    Map<String, Object> paging = (Map<String, Object>) parsed.get('paging');
+    Map<String, Object> next = (paging != null)
+      ? (Map<String, Object>) paging.get('next')
+      : null;
+    return (next != null) ? (String) next.get('after') : null;
   }
 
   private static List<Object> resultsOf(String responseBody) {
